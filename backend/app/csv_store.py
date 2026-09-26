@@ -116,3 +116,11 @@ class CsvStore:
                     'total': total, 'offset': offset, 'limit': limit,
                     'has_more': offset + len(rows) < total,
                     'records': [self.evidence(r) for r in rows]}
+
+    def read_one(self, document_id, evidence_id):
+        with closing(sqlite3.connect(self.database)) as db:
+            db.row_factory = sqlite3.Row
+            row = db.execute('''SELECT r.*,c.headers,d.original_filename FROM csv_records r
+                JOIN csv_documents c USING(document_id) JOIN documents d USING(document_id)
+                WHERE r.document_id=? AND r.evidence_id=?''', (document_id, evidence_id)).fetchone()
+            return self.evidence(row) if row is not None else None

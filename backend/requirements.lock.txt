@@ -64,7 +64,12 @@ urllib3==2.8.0
 uuid-utils==0.17.1
 uvicorn==0.54.0
 voyageai==0.5.0
-websockets==17.1
+websockets==16.1.1
 xxhash==4.0.1
 yarl==1.25.1
 zstandard==0.25.0
+google-auth==2.58.1
+google-genai==2.25.0
+groq==1.7.0
+pyasn1==0.6.4
+pyasn1-modules==0.4.2

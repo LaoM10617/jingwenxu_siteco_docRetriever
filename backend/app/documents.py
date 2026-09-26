@@ -342,6 +342,26 @@ class DocumentService:
     def stop_event(self):
         return self._stop
 
+    def read_evidence_id(self, document_id, evidence_id):
+        """Resolve a composite source identity, with the same ready gate as paging."""
+        with self._lock:
+            document = self.get(document_id)
+            if document is None:
+                raise DocumentError('document_not_found', 'Unknown document ID.', 404)
+            if document['status'] != 'ready':
+                raise DocumentError('document_not_ready', 'The document is not available for queries.', 409)
+            if document_id in self._csv_ready:
+                row = self._csv.read_one(document_id, evidence_id)
+            elif document_id in self._published:
+                prepared, _ = self._published[document_id]
+                row = next((e for e in prepared.evidence if e['evidence_id'] == evidence_id), None)
+            else:
+                row = None
+            if row is None:
+                raise DocumentError('evidence_not_found', 'Unknown evidence ID.', 404)
+            return json.loads(json.dumps({**row, 'document_id': document_id,
+                                          'original_filename': document['original_filename']}))
+
     def pdf_snapshot(self, document_ids):
         with self._lock:
             result = {}

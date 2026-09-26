@@ -15,6 +15,9 @@ from app.uploads import router
 from app.processing import DocumentProcessor
 from app.retrieval.pdf import PdfRetriever
 from app.voyage import configured_gateway
+from app.questions import QuestionTools
+from app.answers import AnswerService
+from app.generation import StructuredModel
 
 VERSION = "0.1.0"
 
@@ -50,6 +53,8 @@ def create_app(settings: Settings | None = None, *, processor=None) -> FastAPI:
             app.state.documents = DocumentService(configuration.data_dir)
             gateway = configured_gateway(configuration) if processor is None else getattr(processor, 'gateway', None)
             app.state.retriever = PdfRetriever(app.state.documents, app.state.documents.lexical, gateway)
+            app.state.answers = AnswerService(QuestionTools(app.state.documents, app.state.retriever),
+                                             StructuredModel(configuration))
             await run_in_threadpool(app.state.documents.start, processor if processor is not None else DocumentProcessor(gateway))
         except (OSError, sqlite3.Error):
             raise StartupError("Upload storage initialization failed; check permissions and database") from None
