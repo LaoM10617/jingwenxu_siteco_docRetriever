@@ -403,3 +403,27 @@ M2.2 acceptance passes for the agreed lifecycle scope. Success publication uses
 controlled adapters in tests; no production fake-success path exists. Real parser,
 Embedding and FAISS acceptance are deferred to their implementation steps. M2 as
 a whole is still incomplete and its final dual-axis review remains pending.
+
+## M2.3.1–2：PDF原生逐页解析
+
+已实现app.parsing.parse_document(path, media_type, ParseLimits)及不可变结果：Evidence含文件哈希/解析版本绑定的ID、原文、物理页码、页级bbox和可选section；PageResult含extracted/degraded/no_text/failed；warnings含页码和固定原因。coverage从页面记录派生，不是语义提取率。本步使用原生页文本，尚无布局分组、降级路径或切块，因此degraded暂不会产生，bbox是整页而非精确文本区域。
+
+逐页无可用文本则跳过，短型号不按字数丢弃。只隔离明确PDF/PS内容异常；pdfplumber包装的异常检查原始原因，OSError/RuntimeError不冒充页警告。无法打开/枚举、超过50页、全无证据明确失败；全无证据异常仍附页面记录与warnings。ID在文件或解析版本变化时更新，重复相同输入稳定。证据尚未绑定上传document_id，该关联留处理链适配器。
+
+依赖pdfplumber0.11.10及传递版本已写入运行锁；无OCR、视觉模型或FAISS。Windows/Linux安装及pip check通过，全量58测试+10subtests通过（保留1条既有httpx提示）；最后源文件哈希调整后本机解析6测试再次通过。测试包含真实小型PDF、50/51页边界、空页与全空、坏文件、页面故障注入、存储/程序异常传播。页面异常注入只替代外部PDF库边界，不声称已覆盖所有损坏PDF。
+
+开发材料原生提取冒烟：采购条款4/4页有文本，Rondel2/2，Highbay18/22有文本、4页no_text。复用此前PDF技能已核对的页图作为样本背景；本轮不声称布局/型号关系通过。页码标题/页脚噪声识别仍待布局步骤。未接入正式处理器、warnings持久化或HTTP；上传仍明确processing_not_configured，不直接ready。下一步M2.3.3布局分组与有限降级。
+
+## M2.3.3–4: layout and bounded chunks
+
+`app.parsing.parse_document` now returns page-local chunks. `text` is extracted body text; `source_spans` retain its text and bboxes; `context` retains repeated original headings/headers with their bboxes; `retrieval_text` joins context and body. Bboxes use PDF points from the top-left, and every span belongs to the Evidence physical page. The enclosing bbox can span a page title and table; use individual spans for precise highlighting. No generated facts or inferred model labels are added.
+
+Internal character target/max are 2400/6000, pending provider token validation later. Complete table rows and top-level clauses are atomic, including continuations and indented subclauses. Oversized indivisible units are skipped with warnings; all-empty evidence fails. Uncertain regions retain native text with layout warnings. No OCR/vision or cross-page reconstruction.
+
+Run `backend/.venv/Scripts/python.exe eval/check_m23_pdf.py` for development-sample relation checks (local data required, no API calls). Results and limitations: `eval/results/m23_layout.md`. Windows/Linux full suite: 64 tests plus 10 subtests. This parser is not connected to the production worker yet; upload does not become ready merely from parsing. Coverage/warnings persistence and HTTP exposure remain subsequent work.
+
+## M2.3.6 supersedes the preceding integration limitation
+
+PDF parsing is now wired into the production worker. Parsed evidence, source/context spans, page outcomes and warnings are saved atomically to document_parses, separately from published retrieval artifacts. List/detail return only parsing summaries and warnings; the evidence endpoint remains ready-only. A parsed PDF ends with retrieval_not_configured until embedding/indexing is implemented; CSV remains processing_not_configured. Invalid PDFs have fixed public errors. No parser exception text or internal paths are returned.
+
+Retry clears the previous parse checkpoint; interruption preserves a checkpoint already committed, but late reports cannot overwrite it. Restart does not automatically parse again. Final Windows/Linux: 69 tests + 10 subtests. Real Docker Highbay upload/restart and HTTP summary persistence passed; see eval/results/m23_layout.md. M2.3 is accepted only for PDF-to-evidence/coverage, not ready/query completion.

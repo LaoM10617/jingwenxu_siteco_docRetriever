@@ -1,4 +1,5 @@
 import time
+import pytest
 from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
@@ -44,6 +45,52 @@ def poll(client, document_id, status):
             return response.json()
         time.sleep(.01)
     raise AssertionError(response.json())
+
+
+def test_pdf_coverage_and_unpublished_evidence_survive_restart(tmp_path):
+    from test_parsing import pdf_file
+    path = pdf_file(tmp_path, ['Clause with condition', '', 'X1'])
+    settings = Settings(data_dir=tmp_path / 'runtime')
+    with TestClient(create_app(settings)) as client:
+        doc_id = client.post('/api/documents', files={'file': ('sample.pdf', path.read_bytes())}).json()['document_id']
+        result = poll(client, doc_id, 'failed')
+        assert result['error']['code'] == 'retrieval_not_configured'
+        assert result['parsing']['coverage'] == {'extracted': 2, 'degraded': 0, 'no_text': 1, 'failed': 0}
+        assert result['parsing']['page_count'] == 3
+        assert result['parsing']['evidence_count'] == 2
+        assert result['parsing']['coverage_limited'] is True
+        assert result['warnings'][0]['page_number'] == 2
+        assert result['progress'] is None
+        assert 'Clause with condition' not in str(result)
+        assert client.get(f'/api/documents/{doc_id}/evidence').status_code == 409
+
+        stored = client.app.state.documents.get(doc_id)['parse_result']
+    with TestClient(create_app(settings)) as client:
+        restored = client.get(f'/api/documents/{doc_id}').json()
+        assert restored == result
+        assert client.get('/api/documents').json() == [result]
+        assert client.app.state.documents.get(doc_id)['parse_result'] == stored
+        assert stored['evidence'][1]['page_number'] == 3
+        assert stored['evidence'][0]['source_spans']
+        assert client.get(f'/api/documents/{doc_id}/evidence').status_code == 409
+
+
+@pytest.mark.parametrize('kind,code', [('empty', 'no_usable_evidence'), ('broken', 'pdf_unreadable'), ('limit', 'pdf_page_limit')])
+def test_pdf_parse_failures_are_public_and_retained(tmp_path, kind, code):
+    from test_parsing import pdf_file
+    data = b'%PDF-1.4\nbroken' if kind == 'broken' else pdf_file(tmp_path, [''] * 2 if kind == 'empty' else ['X'] * 51).read_bytes()
+    settings = Settings(data_dir=tmp_path / 'runtime')
+    with TestClient(create_app(settings)) as client:
+        doc_id = client.post('/api/documents', files={'file': ('bad.pdf', data)}).json()['document_id']
+        result = poll(client, doc_id, 'failed')
+        assert result['error']['code'] == code
+        assert result['error']['retryable'] is False
+        assert result['parsing']['evidence_count'] == 0
+        assert result['parsing']['coverage_limited'] is True
+        assert result['parsing']['page_count'] == (2 if kind == 'empty' else None)
+        assert str(tmp_path) not in str(result)
+    with TestClient(create_app(settings)) as client:
+        assert client.get(f'/api/documents/{doc_id}').json() == result
 
 
 def test_http_retry_publication_and_evidence_pagination(tmp_path):

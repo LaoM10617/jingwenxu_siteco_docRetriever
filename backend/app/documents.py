@@ -1,6 +1,7 @@
 """Persist accepted uploads and reserve capacity before reading their contents."""
 from contextlib import closing
 from datetime import datetime, timezone
+from dataclasses import asdict
 from hashlib import sha256
 from pathlib import Path
 import sqlite3
@@ -9,7 +10,7 @@ import logging
 from queue import Queue, Empty
 from threading import RLock, Event, Thread
 
-from app.processing import PreparedDocument, ProcessingFailure, UnavailableProcessor
+from app.processing import PreparedDocument, ProcessingFailure, PdfParsingProcessor
 from uuid import uuid4
 
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -40,6 +41,7 @@ class DocumentService:
                 created_at TEXT NOT NULL, updated_at TEXT NOT NULL)''')
             db.execute('CREATE TABLE IF NOT EXISTS upload_reservations (document_id TEXT PRIMARY KEY)')
             db.execute('CREATE TABLE IF NOT EXISTS document_artifacts (document_id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS document_parses (document_id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
 
     def reserve(self):
         """Reserve one slot atomically, including requests still receiving bytes."""
@@ -123,9 +125,11 @@ class DocumentService:
         with self._lock, closing(sqlite3.connect(self.database)) as db:
             db.row_factory = sqlite3.Row
             row = db.execute('SELECT * FROM documents WHERE document_id=?', (document_id,)).fetchone()
+            parsed = db.execute('SELECT payload FROM document_parses WHERE document_id=?', (document_id,)).fetchone()
         if row is None:
             return None
         document = dict(row)
+        document['parse_result'] = json.loads(parsed[0]) if parsed else None
         code = document['error_code']
         document['error'] = None if code is None else {
             'code': code, 'message': ERRORS.get(code, ERRORS['processing_failed'])[0],
@@ -143,7 +147,7 @@ class DocumentService:
         with self._lock:
             if self._thread is not None:
                 raise RuntimeError('Document service cannot be started twice')
-            self._processor = processor if processor is not None else UnavailableProcessor()
+            self._processor = processor if processor is not None else PdfParsingProcessor()
             self.recover_receiving()
             with closing(sqlite3.connect(self.database)) as db, db:
                 db.execute("UPDATE documents SET status='failed', stage='failed', error_code='processing_interrupted', updated_at=? WHERE status IN ('queued','processing')", (self._now(),))
@@ -195,14 +199,19 @@ class DocumentService:
             raise ProcessingFailure('incomplete_result')
         return index
 
-    def _report(self, document_id, stage):
+    def _report(self, document_id, stage, *, parsed=None):
         if stage not in {'parsing', 'embedding', 'waiting_rate_limit', 'indexing'}:
             raise ProcessingFailure('processing_failed')
         with self._lock:
             if self._stop.is_set():
                 raise ProcessingFailure('processing_interrupted')
             with closing(sqlite3.connect(self.database)) as db, db:
-                db.execute("UPDATE documents SET stage=?, updated_at=? WHERE document_id=? AND status='processing'", (stage, self._now(), document_id))
+                changed = db.execute("UPDATE documents SET stage=?, updated_at=? WHERE document_id=? AND status='processing'", (stage, self._now(), document_id)).rowcount
+                if not changed:
+                    raise ProcessingFailure('processing_interrupted')
+                if parsed is not None:
+                    db.execute('INSERT OR REPLACE INTO document_parses VALUES (?,?)',
+                               (document_id, json.dumps(asdict(parsed), allow_nan=False)))
 
     def _work(self):
         while not self._stop.is_set():
@@ -220,7 +229,7 @@ class DocumentService:
                         continue
                 document = self.get(document_id)
                 prepared = self._processor.prepare(self.uploads / document['stored_name'], document,
-                    lambda stage: self._report(document_id, stage), self._stop)
+                    lambda stage, **kwargs: self._report(document_id, stage, **kwargs), self._stop)
                 if not isinstance(prepared, PreparedDocument):
                     raise ProcessingFailure('incomplete_result')
                 # Detach the result from mutable objects retained by the processor.
@@ -258,6 +267,7 @@ class DocumentService:
             if count >= self.max_documents:
                 raise DocumentError('document_limit_reached', 'The workspace has no free document slots.', 409)
             db.execute("UPDATE documents SET status='queued', stage='queued', error_code=NULL, updated_at=? WHERE document_id=?", (self._now(), document_id))
+            db.execute('DELETE FROM document_parses WHERE document_id=?', (document_id,))
             db.commit()
             self._jobs.put_nowait(document_id)
             return self.get(document_id)
@@ -276,6 +286,11 @@ class DocumentService:
 
 
 ERRORS = {
+    'retrieval_not_configured': ('PDF parsing completed; embedding and retrieval are not configured in this build.', False),
+    'pdf_unreadable': ('Cannot open the PDF; it may be damaged or encrypted.', False),
+    'pdf_pages_unreadable': ('Cannot reliably enumerate PDF pages.', False),
+    'pdf_page_limit': ('PDF exceeds the page limit.', False),
+    'no_usable_evidence': ('No usable native-text evidence was extracted.', False),
     'processing_not_configured': ('Document processing is not configured in this build.', False),
     'processing_interrupted': ('Processing was interrupted; retry the document.', True),
     'processing_failed': ('Document processing failed; retry or check the file.', True),

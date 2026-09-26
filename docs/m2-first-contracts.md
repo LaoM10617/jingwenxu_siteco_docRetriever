@@ -58,6 +58,8 @@ T-001 tracing沿用。第二批再明确POST /api/questions、retrieve(question,
 
 ## 分段验收
 
+M2.3已接入PDF解析检查点：列表/详情的`parsing`为null或包含parser_version、page_count（未知为null）、coverage（extracted/degraded/no_text/failed计数）、evidence_count、coverage_limited；warnings包含page_number/code/message。不公开未ready证据正文。progress仍null，不把页覆盖当作索引完成度或准确率。重试清空旧解析检查点，成功解析也须等待后续检索数据完整发布；当前明确failed/retrieval_not_configured。CSV处理暂未接入。
+
 A：API+SQLite+Docker健康接口，模型客户端fake、不用凭据。
 B：PDF/CSV到证据、失败与重启行为；检查开发材料。
 C：Voyage适配器与假时钟限流自动测试通过后，真实Voyage只做一小批文档Embedding及一个问题Embedding，串行共享预算；这只证明接入，不代替效果评估。生成模型接入另做少量真实调用，不自动整套13题或保留题。

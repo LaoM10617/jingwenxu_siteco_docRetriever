@@ -123,13 +123,16 @@ Limits: 20 MiB actual file bytes, at most 10 occupied document slots including
 uploads being received. Rejected uploads release their reservation. Only one
 `file` multipart field is accepted; transport overhead is bounded to 64 KiB
 above the file limit. PDF headers are checked, while full PDF validity, page
-count, CSV structure and record count await parsing. Errors include 413 (size),
+count are checked asynchronously by the PDF parser (maximum 50 pages); CSV
+structure and record count await CSV parsing. Errors include 413 (size),
 415 (type), 409 (capacity), 422 (empty/malformed request), and sanitized 503
 (storage unavailable), with `error.code/message/retryable`.
 
 This intermediate build accepts uploads as queued, then its single background
-worker reports `failed` with `processing_not_configured`: real parsing/indexing
-is not connected yet. No fake successful processing is used. Status, retry and evidence HTTP endpoints are available as described below.
+worker parses PDFs and persists evidence, page coverage and warnings. Successful
+PDF parsing then reports `failed/retrieval_not_configured` because embedding and
+indexing are not connected yet. CSV still reports `processing_not_configured`.
+No fake ready state is used. Status, retry and evidence endpoints are available below.
 
 The lifecycle supports queued → processing → ready/failed, whole-document
 publication, and explicit manual retry of retryable failures using the same ID.
@@ -155,7 +158,12 @@ cancellation. This is not a durable task queue or an exactly-once guarantee.
 Unknown IDs return 404. Errors use `error.code/message/retryable`; invalid query
 parameters return a sanitized 422. Responses exclude stored paths and config.
 Metadata includes file type, size and timestamps. `progress` is null until actual
-counts are available; `warnings` is currently empty. No invented percentages or
+counts are available. PDF `parsing` includes parser_version, page_count, coverage,
+evidence_count and coverage_limited; `warnings` includes physical page numbers,
+fixed codes and explanations. Both persist across restart. Before parsing the
+summary is null; unreadable/over-limit PDFs have an unknown (null) page_count,
+not a fabricated count. coverage_limited=false does not prove complete extraction.
+No invented percentages or
 completion estimates are shown. Poll about once per second while queued/processing
 and stop when ready/failed; this is a client recommendation, not server push.
 
@@ -166,7 +174,7 @@ Invoke-RestMethod http://127.0.0.1:8000/api/documents/REPLACE_WITH_DOCUMENT_ID
 
 M2.2 acceptance covers upload identity/limits, lifecycle, publication gates,
 interruption and the HTTP contract. Controlled processors prove successful
-publication in tests. Production still reports processing_not_configured until
-real parsing/embedding/indexing is integrated; real document-to-ready and question
+publication in tests. M2.3 accepts PDF-to-evidence and durable coverage; production
+PDF processing still stops at retrieval_not_configured. Real document-to-ready and question
 answering acceptance remain pending. Use HTTP to read live state; do not open the
 running container's SQLite database from Windows.

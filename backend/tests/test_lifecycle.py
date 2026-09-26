@@ -39,6 +39,55 @@ def wait_status(service, doc_id, status):
     pytest.fail(f'Expected {status}, got {value}')
 
 
+def test_parse_checkpoint_retry_and_interruption(tmp_path):
+    from app.parsing import parse_document, ParseLimits
+    from test_parsing import pdf_file
+    parsed = parse_document(pdf_file(tmp_path, ['Useful evidence', '']), 'application/pdf', ParseLimits())
+    class Checkpoint:
+        calls = 0
+        entered = Event()
+        release = Event()
+        def prepare(self, path, document, report, stop):
+            self.calls += 1
+            if self.calls == 2:
+                self.entered.set()
+                assert self.release.wait(5)
+            report('parsing', parsed=parsed)
+            if self.calls == 1:
+                raise RuntimeError('provider-private-detail')
+            stop.wait(5)
+            # A late checkpoint after shutdown must be rejected.
+            report('parsing', parsed=parsed)
+    processor = Checkpoint()
+    service = DocumentService(tmp_path / 'runtime')
+    service.start(processor)
+    try:
+        doc_id = service.submit('file.csv', BytesIO(b'id\n1'))['document_id']
+        assert wait_status(service, doc_id, 'failed')['parse_result']['pages'][1]['status'] == 'no_text'
+        service.retry(doc_id)
+        assert processor.entered.wait(5)
+        assert service.get(doc_id)['parse_result'] is None
+        processor.release.set()
+        until = time.monotonic() + 5
+        while service.get(doc_id)['parse_result'] is None and time.monotonic() < until:
+            time.sleep(.01)
+        before = service.get(doc_id)['parse_result']
+        assert before is not None
+    finally:
+        processor.release.set()
+        service.stop()
+    restored = DocumentService(tmp_path / 'runtime')
+    restored.start()
+    try:
+        result = restored.get(doc_id)
+        assert result['error']['code'] == 'processing_interrupted'
+        assert result['parse_result'] == before
+        with pytest.raises(DocumentError):
+            restored.read_evidence(doc_id)
+    finally:
+        restored.stop()
+
+
 def test_only_complete_publication_is_readable_and_survives_restart(tmp_path):
     service, pipeline = DocumentService(tmp_path), Pipeline()
     service.start(pipeline)

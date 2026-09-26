@@ -62,7 +62,19 @@ def public_document(document):
     result['media_type'] = 'application/pdf' if document['original_filename'].lower().endswith('.pdf') else 'text/csv'
     # Counts are unknown until the processing adapter reports them.
     result['progress'] = None
-    result['warnings'] = []
+    parsed = document['parse_result']
+    result['warnings'] = parsed['warnings'] if parsed else []
+    result['parsing'] = None
+    if parsed is not None:
+        coverage = {status: sum(p['status'] == status for p in parsed['pages'])
+                    for status in ('extracted', 'degraded', 'no_text', 'failed')}
+        result['parsing'] = {
+            'parser_version': parsed['parser_version'],
+            'page_count': len(parsed['pages']) or None,
+            'coverage': coverage,
+            'evidence_count': len(parsed['evidence']),
+            'coverage_limited': bool(parsed['warnings']) or not parsed['pages'],
+        }
     return result
 
 
