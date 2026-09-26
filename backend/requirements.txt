@@ -1,2 +1,7 @@
-# Dependency for the migrated lexical retrieval module.
+# Direct runtime dependencies; Windows and Linux Python 3.12 verified.
 rank-bm25==0.2.2
+pydantic==2.13.5
+pydantic-settings==2.15.0
+fastapi==0.141.1
+uvicorn==0.54.0
+python-multipart==0.0.32

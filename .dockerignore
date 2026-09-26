@@ -1,0 +1,21 @@
+# Backend build allowlist: never send local credentials, data, environments or Git.
+**
+!backend/
+!backend/Dockerfile
+!backend/requirements.txt
+!backend/requirements.lock.txt
+!backend/requirements-dev.txt
+!backend/requirements-dev.lock.txt
+!backend/app/
+!backend/app/**
+!backend/tests/
+!backend/tests/**
+!tests/
+!tests/test_tracing.py
+!pytest.ini
+**/__pycache__/**
+**/*.pyc
+**/.env*
+**/*API_KEY*
+**/grok.txt
+**/voyage.txt

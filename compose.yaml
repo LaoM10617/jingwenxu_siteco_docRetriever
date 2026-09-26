@@ -1,0 +1,23 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: runtime
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8000}:8000"
+    environment:
+      APP_PORT: "8000"
+      DATA_DIR: /app/runtime
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      GENERATION_PROVIDER: ${GENERATION_PROVIDER:-gemini}
+      GEMINI_GENERATION_MODEL: ${GEMINI_GENERATION_MODEL:-gemini-3.5-flash-lite}
+      GROQ_GENERATION_MODEL: ${GROQ_GENERATION_MODEL:-openai/gpt-oss-120b}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-voyage}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-voyage-4}
+    volumes:
+      - type: bind
+        source: ${HOST_DATA_DIR:-./data/runtime}
+        target: /app/runtime

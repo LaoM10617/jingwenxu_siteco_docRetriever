@@ -37,3 +37,8 @@ test-results/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# User-provided local API credentials
+/Gemini_API_KEY.txt
+/grok.txt
+/voyage.txt
