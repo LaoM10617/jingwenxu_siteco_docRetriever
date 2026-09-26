@@ -18,7 +18,7 @@ def test_status_http_is_safe_and_survives_restart(tmp_path):
                 if response.json()['status'] == 'failed':
                     break
                 time.sleep(.01)
-            assert response.json()['error']['code'] == 'processing_not_configured'
+            assert response.json()['error']['code'] == 'csv_header_invalid'
             assert 'stored_name' not in response.json()
             assert str(tmp_path) not in response.text
             assert client.get(f'/api/documents/{doc_id}/evidence').status_code == 409

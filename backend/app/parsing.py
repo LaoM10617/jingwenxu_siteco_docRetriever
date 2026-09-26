@@ -1,9 +1,13 @@
-"""Native PDF page extraction. Layout grouping and indexing are separate steps."""
+"""Document parsing entry point; PDF evidence and CSV records retain their own locators."""
+from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .csv_parsing import ParsedCsvDocument
 
 import pdfplumber
 from pdfminer.psexceptions import PSException
@@ -20,6 +24,7 @@ CHUNK_MAX = 6000
 @dataclass(frozen=True)
 class ParseLimits:
     max_pages: int = 50
+    max_records: int = 20_000
 
 
 @dataclass(frozen=True)
@@ -120,9 +125,12 @@ def _page_evidence(regions, content_hash, number):
     return evidence, omitted
 
 
-def parse_document(stored_file: Path, media_type: str, limits: ParseLimits) -> ParsedDocument:
+def parse_document(stored_file: Path, media_type: str, limits: ParseLimits) -> ParsedDocument | ParsedCsvDocument:
+    if media_type == 'text/csv':
+        from .csv_parsing import parse_csv
+        return parse_csv(stored_file, limits.max_records)
     if media_type != 'application/pdf':
-        raise ParseError('unsupported_media_type', 'This parser currently supports PDF only.')
+        raise ParseError('unsupported_media_type', 'This parser supports PDF and price-list CSV only.')
     if limits.max_pages < 1:
         raise ValueError('max_pages must be positive')
     # Explicitly own the stream, including failures while opening/enumerating the PDF.

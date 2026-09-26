@@ -56,9 +56,13 @@ T-005 HTTP上述六个接口：202/404/409/413/415、字段与错误可行动、
 
 T-001 tracing沿用。第二批再明确POST /api/questions、retrieve(question, document_ids)、lookup_orders(order_ids, document_ids)与引用校验；届时补fusion/lexical正式测试。不能为了首批省时改变最终支持的PDF+CSV主线。
 
+M2.5更新：用户已批准T-006精确订单查询边界，见docs/m25-csv-contract.md；前三步实现T-003 CSV解析，后三步完成T-002持久化/完整发布及T-006精确查询验收。正式HTTP仍为既有接口，问题入口、PDF retrieve与引用校验仍待对应阶段确认。
+
 ## 分段验收
 
-M2.3已接入PDF解析检查点：列表/详情的`parsing`为null或包含parser_version、page_count（未知为null）、coverage（extracted/degraded/no_text/failed计数）、evidence_count、coverage_limited；warnings包含page_number/code/message。不公开未ready证据正文。progress仍null，不把页覆盖当作索引完成度或准确率。重试清空旧解析检查点，成功解析也须等待后续检索数据完整发布；当前明确failed/retrieval_not_configured。CSV处理暂未接入。
+M2.3已接入PDF解析检查点：列表/详情的`parsing`为null或包含parser_version、page_count（未知为null）、coverage（extracted/degraded/no_text/failed计数）、evidence_count、coverage_limited；warnings包含page_number/code/message。不公开未ready证据正文。progress仍null，不把页覆盖当作索引完成度或准确率。重试清空旧解析检查点，成功解析也须等待后续检索数据完整发布；PDF当前明确failed/retrieval_not_configured。
+
+M2.5 CSV已接入：parsing.kind=csv，parser_version、record_count、indexed_record_count、price_counts；warnings使用record_number/column/code/message。证据分页新增headers、原raw_values及price/price_status，金额为无损字符串或null。不伪造页数/覆盖。全部记录和精确索引校验完成才ready；具体发布、缺键文件和T-006响应见CSV契约。
 
 A：API+SQLite+Docker健康接口，模型客户端fake、不用凭据。
 B：PDF/CSV到证据、失败与重启行为；检查开发材料。

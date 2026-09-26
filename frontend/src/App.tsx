@@ -378,7 +378,16 @@ export default function App() {
                       : "Retry processing"}
                   </button>
                 )}
-                {doc.parsing && (
+                {doc.parsing?.kind === "csv" && (
+                  <details>
+                    <summary>{doc.parsing.record_count} records · {doc.parsing.indexed_record_count} with order IDs</summary>
+                    <p className="muted">
+                      Prices: {doc.parsing.price_counts.valid} valid, {doc.parsing.price_counts.missing} missing, {doc.parsing.price_counts.invalid} invalid.
+                      Original values and duplicate records are retained.
+                    </p>
+                  </details>
+                )}
+                {doc.parsing && doc.parsing.kind !== "csv" && (
                   <details>
                     <summary>
                       {doc.parsing.evidence_count} extracted passages ·{" "}
@@ -404,7 +413,9 @@ export default function App() {
                     <ul>
                       {doc.warnings.map((warning, index) => (
                         <li key={index}>
-                          Page {warning.page_number}: {warning.message}
+                          {warning.record_number != null
+                            ? `Record ${warning.record_number} (${warning.column})`
+                            : `Page ${warning.page_number}`}: {warning.message}
                         </li>
                       ))}
                     </ul>

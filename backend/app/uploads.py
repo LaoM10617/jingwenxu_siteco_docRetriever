@@ -65,7 +65,10 @@ def public_document(document):
     parsed = document['parse_result']
     result['warnings'] = parsed['warnings'] if parsed else []
     result['parsing'] = None
-    if parsed is not None:
+    if parsed is not None and parsed.get('kind') == 'csv':
+        result['parsing'] = {key: parsed[key] for key in (
+            'kind', 'parser_version', 'record_count', 'indexed_record_count', 'price_counts')}
+    elif parsed is not None:
         coverage = {status: sum(p['status'] == status for p in parsed['pages'])
                     for status in ('extracted', 'degraded', 'no_text', 'failed')}
         result['parsing'] = {
@@ -101,5 +104,5 @@ def document_evidence(document_id: str, request: Request,
                       offset: int = Query(default=0, ge=0),
                       limit: int = Query(default=20, ge=1, le=100)):
     evidence = request.app.state.documents.read_evidence(document_id, offset, limit)
-    return [{key: item[key] for key in ('evidence_id', 'text', 'locator', 'raw_values') if key in item}
+    return [{key: item[key] for key in ('evidence_id', 'text', 'locator', 'raw_values', 'headers', 'price', 'price_status') if key in item}
             for item in evidence]

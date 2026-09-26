@@ -10,7 +10,9 @@ import logging
 from queue import Queue, Empty
 from threading import RLock, Event, Thread
 
-from app.processing import PreparedDocument, ProcessingFailure, PdfParsingProcessor
+from app.processing import PreparedDocument, ProcessingFailure, DocumentProcessor
+from app.csv_parsing import ParsedCsvDocument
+from app.csv_store import CsvStore, summary
 from uuid import uuid4
 
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -33,6 +35,7 @@ class DocumentService:
         self._jobs = Queue(maxsize=max_documents)
         self._thread = None
         self._published = {}
+        self._csv_ready = set()
         with closing(sqlite3.connect(self.database)) as db, db:
             db.execute('''CREATE TABLE IF NOT EXISTS documents (
                 document_id TEXT PRIMARY KEY, original_filename TEXT NOT NULL,
@@ -42,6 +45,7 @@ class DocumentService:
             db.execute('CREATE TABLE IF NOT EXISTS upload_reservations (document_id TEXT PRIMARY KEY)')
             db.execute('CREATE TABLE IF NOT EXISTS document_artifacts (document_id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS document_parses (document_id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
+        self._csv = CsvStore(self.database)
 
     def reserve(self):
         """Reserve one slot atomically, including requests still receiving bytes."""
@@ -147,13 +151,16 @@ class DocumentService:
         with self._lock:
             if self._thread is not None:
                 raise RuntimeError('Document service cannot be started twice')
-            self._processor = processor if processor is not None else PdfParsingProcessor()
+            self._processor = processor if processor is not None else DocumentProcessor()
             self.recover_receiving()
             with closing(sqlite3.connect(self.database)) as db, db:
                 db.execute("UPDATE documents SET status='failed', stage='failed', error_code='processing_interrupted', updated_at=? WHERE status IN ('queued','processing')", (self._now(),))
                 ready = db.execute("SELECT document_id FROM documents WHERE status='ready'").fetchall()
             for (document_id,) in ready:
                 try:
+                    if self._csv.restore(document_id, self.get(document_id)['parse_result']):
+                        self._csv_ready.add(document_id)
+                        continue
                     with closing(sqlite3.connect(self.database)) as db:
                         payload = db.execute('SELECT payload FROM document_artifacts WHERE document_id=?', (document_id,)).fetchone()
                     prepared = PreparedDocument(**json.loads(payload[0]))
@@ -184,6 +191,7 @@ class DocumentService:
             db.execute("UPDATE documents SET status='failed', stage='failed', error_code=?, updated_at=? WHERE document_id=? AND status IN ('queued','processing','ready')",
                        (code, self._now(), document_id))
             self._published.pop(document_id, None)
+            self._csv_ready.discard(document_id)
 
     def _build_index(self, prepared):
         # The concrete adapter additionally validates its vector/CSV schema.
@@ -211,7 +219,7 @@ class DocumentService:
                     raise ProcessingFailure('processing_interrupted')
                 if parsed is not None:
                     db.execute('INSERT OR REPLACE INTO document_parses VALUES (?,?)',
-                               (document_id, json.dumps(asdict(parsed), allow_nan=False)))
+                               (document_id, json.dumps(summary(parsed) if isinstance(parsed, ParsedCsvDocument) else asdict(parsed), allow_nan=False)))
 
     def _work(self):
         while not self._stop.is_set():
@@ -230,6 +238,18 @@ class DocumentService:
                 document = self.get(document_id)
                 prepared = self._processor.prepare(self.uploads / document['stored_name'], document,
                     lambda stage, **kwargs: self._report(document_id, stage, **kwargs), self._stop)
+                if isinstance(prepared, ParsedCsvDocument):
+                    self._csv.stage(document_id, prepared)
+                    if not self._csv.restore(document_id, self.get(document_id)['parse_result']):
+                        raise ProcessingFailure('incomplete_result')
+                    with self._lock:
+                        if self._stop.is_set():
+                            continue
+                        with closing(sqlite3.connect(self.database)) as db, db:
+                            changed = db.execute("UPDATE documents SET status='ready', stage='ready', error_code=NULL, updated_at=? WHERE document_id=? AND status='processing'", (self._now(), document_id)).rowcount
+                        if changed:
+                            self._csv_ready.add(document_id)
+                    continue
                 if not isinstance(prepared, PreparedDocument):
                     raise ProcessingFailure('incomplete_result')
                 # Detach the result from mutable objects retained by the processor.
@@ -268,6 +288,8 @@ class DocumentService:
                 raise DocumentError('document_limit_reached', 'The workspace has no free document slots.', 409)
             db.execute("UPDATE documents SET status='queued', stage='queued', error_code=NULL, updated_at=? WHERE document_id=?", (self._now(), document_id))
             db.execute('DELETE FROM document_parses WHERE document_id=?', (document_id,))
+            self._csv.clear(db, document_id)
+            db.execute('DELETE FROM document_artifacts WHERE document_id=?', (document_id,))
             db.commit()
             self._jobs.put_nowait(document_id)
             return self.get(document_id)
@@ -279,13 +301,43 @@ class DocumentService:
             document = self.get(document_id)
             if document is None:
                 raise DocumentError('document_not_found', 'Unknown document ID.', 404)
-            if document['status'] != 'ready' or document_id not in self._published:
+            if document['status'] != 'ready' or document_id not in self._published and document_id not in self._csv_ready:
                 raise DocumentError('document_not_ready', 'The document is not available for queries.', 409)
+            if document_id in self._csv_ready:
+                return self._csv.read(document_id, offset, limit)
             prepared, _ = self._published[document_id]
             return json.loads(json.dumps(prepared.evidence[offset:offset + limit]))
 
+    def lookup_orders(self, order_ids, document_ids, offset=0, limit=50):
+        if (not isinstance(order_ids, list) or not order_ids
+                or any(not isinstance(v, str) or not v.strip() for v in order_ids)
+                or not isinstance(document_ids, list) or not document_ids
+                or any(not isinstance(v, str) or not v for v in document_ids)):
+            raise DocumentError('invalid_query', 'Provide nonempty string order IDs and explicit document IDs.', 422)
+        if type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 100:
+            raise DocumentError('invalid_pagination', 'Invalid query pagination.', 422)
+        orders = list(dict.fromkeys(v.strip() for v in order_ids))
+        documents = list(dict.fromkeys(document_ids))
+        with self._lock:
+            for document_id in documents:
+                document = self.get(document_id)
+                if document is None:
+                    raise DocumentError('document_not_found', 'Unknown document ID.', 404)
+                if document['status'] != 'ready':
+                    raise DocumentError('document_not_ready', 'The document is not available for queries.', 409)
+                if document_id not in self._csv_ready:
+                    raise DocumentError('document_not_csv', 'Exact order lookup requires a CSV document.', 422)
+            return self._csv.lookup(orders, documents, offset, limit)
+
 
 ERRORS = {
+    'csv_header_invalid': ('CSV headers do not match the supported price-list schema.', False),
+    'csv_record_limit': ('CSV exceeds the 20,000 record limit.', False),
+    'csv_record_invalid': ('CSV record has the wrong number of fields.', False),
+    'csv_no_records': ('CSV contains no data records.', False),
+    'csv_encoding_invalid': ('CSV must use UTF-8 encoding.', False),
+    'csv_unreadable': ('CSV quoting is invalid or a field exceeds the reader limit.', False),
+    'csv_no_order_ids': ('CSV contains no searchable order IDs; inspect the retained warnings.', False),
     'retrieval_not_configured': ('PDF parsing completed; embedding and retrieval are not configured in this build.', False),
     'pdf_unreadable': ('Cannot open the PDF; it may be damaged or encrypted.', False),
     'pdf_pages_unreadable': ('Cannot reliably enumerate PDF pages.', False),

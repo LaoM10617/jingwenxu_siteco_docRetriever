@@ -1,6 +1,6 @@
 # SITECO Document Retriever
 
-The current M2.4 build provides a React/TypeScript document workspace and a FastAPI backend, started together with Docker Compose. Upload PDF/CSV files, inspect processing states and PDF extraction warnings, and restore the material list after refresh. PDF parsing is connected; CSV parsing, embedding, search and answers are still pending. The chat composer is intentionally disabled. A successful PDF parse ends with `retrieval_not_configured`, not a false ready state.
+The current M2.5 build provides a React/TypeScript document workspace and a FastAPI backend, started together with Docker Compose. Upload PDF/CSV files, inspect processing states and extraction warnings, and restore the material list after refresh. Supported price-list CSVs are parsed, indexed in SQLite and published for evidence preview and exact backend order lookup. PDF embedding/retrieval and chat answers remain pending; the chat composer is disabled. A successful PDF parse ends with `retrieval_not_configured`.
 
 See [development setup](docs/development.md) for Python 3.12 environment creation, pinned dependency installation, and verification commands. See [reuse notes](docs/reuse.md) for provenance and migration boundaries.
 
@@ -105,10 +105,10 @@ output when using real credentials; `docker compose config --quiet` validates
 without displaying values. Changing runtime variables requires `up -d` to
 recreate the container, not just `restart`.
 
-M2.4 is validated for the upload/status workspace and two-container proxy.
-Real document-to-ready and question answering remain pending. The frontend
-evidence viewer is tested with controlled ready responses; this is not production
-search acceptance.
+M2.4 validates the upload/status workspace and two-container proxy. M2.5 adds
+real CSV upload-to-ready, evidence pagination, exact order lookup and restoration
+after container recreation. PDF retrieval and question answering remain pending.
+See [CSV contract](docs/m25-csv-contract.md) and [acceptance](eval/results/m25_csv.md).
 See [development notes](docs/development.md) for acceptance evidence and limits.
 
 ## Using the workspace
@@ -159,23 +159,26 @@ Limits: 20 MiB actual file bytes, at most 10 occupied document slots including
 uploads being received. Rejected uploads release their reservation. Only one
 `file` multipart field is accepted; transport overhead is bounded to 64 KiB
 above the file limit. PDF headers are checked, while full PDF validity, page
-count are checked asynchronously by the PDF parser (maximum 50 pages); CSV
-structure and record count await CSV parsing. Errors include 413 (size),
+count are checked asynchronously by the PDF parser (maximum 50 pages). CSV uses
+the fixed UTF-8/semicolon/18-column price-list schema, with a 20,000 logical-record
+limit; structural errors fail the whole file. Errors include 413 (size),
 415 (type), 409 (capacity), 422 (empty/malformed request), and sanitized 503
 (storage unavailable), with `error.code/message/retryable`.
 
 This intermediate build accepts uploads as queued, then its single background
 worker parses PDFs and persists evidence, page coverage and warnings. Successful
 PDF parsing then reports `failed/retrieval_not_configured` because embedding and
-indexing are not connected yet. CSV still reports `processing_not_configured`.
-No fake ready state is used. Status, retry and evidence endpoints are available below.
+indexing are not connected yet. CSV becomes ready only after all records and the
+exact SQLite index are persisted and validated. Missing/invalid prices retain
+their original values and warnings; they never become numeric zero. A file with
+no searchable order IDs fails explicitly. Status, retry and evidence endpoints are available below.
 
 The lifecycle supports queued → processing → ready/failed, whole-document
 publication, and explicit manual retry of retryable failures using the same ID.
 On shutdown/restart, unfinished jobs become `processing_interrupted`; they are
 not automatically resumed. Ready artifacts are restored before queries become
-available; restoration failure is explicit. These success paths are verified
-with controlled test processors, not real PDF/CSV or FAISS acceptance.
+available; restoration failure is explicit. Real CSV restoration is accepted;
+PDF/FAISS success paths still require later-stage acceptance.
 
 Execution is one process, one bounded in-memory queue and one worker thread.
 Shutdown requests cooperative cancellation and waits up to two seconds; late
@@ -203,6 +206,15 @@ No invented percentages or
 completion estimates are shown. Poll about once per second while queued/processing
 and stop when ready/failed; this is a client recommendation, not server push.
 
+CSV `parsing` uses `kind: csv`, `record_count`, `indexed_record_count` and
+`price_counts`, with record/column warnings instead of PDF pages. Evidence
+preserves ordered headers, raw string values and logical record numbers. A valid
+normalized price is a decimal string; missing/invalid prices are null.
+`DocumentService.lookup_orders(order_ids, document_ids, offset=0, limit=50)` is
+the deterministic backend entry: explicit ready CSV scope, exact case-sensitive
+keys, all duplicate sources, full counts and pagination. There is no production
+query HTTP route yet; the later chat layer will call this method.
+
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/documents
 Invoke-RestMethod http://127.0.0.1:8000/api/documents/REPLACE_WITH_DOCUMENT_ID
@@ -211,6 +223,7 @@ Invoke-RestMethod http://127.0.0.1:8000/api/documents/REPLACE_WITH_DOCUMENT_ID
 M2.2 acceptance covers upload identity/limits, lifecycle, publication gates,
 interruption and the HTTP contract. Controlled processors prove successful
 publication in tests. M2.3 accepts PDF-to-evidence and durable coverage; production
-PDF processing still stops at retrieval_not_configured. Real document-to-ready and question
-answering acceptance remain pending. Use HTTP to read live state; do not open the
+PDF processing still stops at retrieval_not_configured. M2.5 accepts real CSV
+document-to-ready and exact lookup; question answering remains pending.
+Use HTTP to read live state; do not open the
 running container's SQLite database from Windows.

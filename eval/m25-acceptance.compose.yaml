@@ -1,0 +1,9 @@
+# Optional test-only override; never use for normal startup.
+services:
+  backend:
+    command: [python, -m, uvicorn, 'm25_acceptance_app:create_app', --factory, --app-dir, /app/eval, --host, 0.0.0.0, --port, '8000', --workers, '1']
+    volumes:
+      - type: bind
+        source: ./eval/m25_acceptance_app.py
+        target: /app/eval/m25_acceptance_app.py
+        read_only: true

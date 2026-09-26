@@ -46,7 +46,9 @@ export default function EvidencePanel({
       </div>
       <p className="filename">{document.original_filename}</p>
       <p className="muted">
-        Extracted text, not a complete representation of the original document.
+        {document.parsing?.kind === "csv"
+          ? "Original CSV fields. Record numbers count data records after the header, including quoted multiline fields as one record."
+          : "Extracted text, not a complete representation of the original document."}
       </p>
       {loading && <p role="status">Loading evidence…</p>}
       {error && (
@@ -69,6 +71,13 @@ export default function EvidencePanel({
             ))}
           </div>
           <p className="source-text">{item.text}</p>
+          {item.price_status && (
+            <p className={item.price_status === "valid" ? "muted" : "error"}>
+              {item.price_status === "valid"
+                ? `Normalized price: ${item.price}. Currency, tax and discounts are not inferred.`
+                : `Price ${item.price_status}: no numeric value available. Original value retained above.`}
+            </p>
+          )}
           {item.raw_values != null && (
             <details>
               <summary>Original values</summary>

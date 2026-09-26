@@ -197,7 +197,7 @@ def test_stop_blocks_late_publication_and_marks_waiting_jobs(tmp_path):
     assert pipeline.calls == 1
 
 
-def test_missing_processor_reports_failure_and_application_stops_worker(tmp_path):
+def test_invalid_csv_reports_failure_and_application_stops_worker(tmp_path):
     from fastapi.testclient import TestClient
     from app.main import create_app
     from app.config import Settings
@@ -208,8 +208,8 @@ def test_missing_processor_reports_failure_and_application_stops_worker(tmp_path
         document_id = response.json()['document_id']
         result = wait_status(app.state.documents, document_id, 'failed')
         assert result['error'] == {
-            'code': 'processing_not_configured',
-            'message': 'Document processing is not configured in this build.',
+            'code': 'csv_header_invalid',
+            'message': 'CSV headers do not match the supported price-list schema.',
             'retryable': False}
         with pytest.raises(DocumentError):
             app.state.documents.retry(document_id)

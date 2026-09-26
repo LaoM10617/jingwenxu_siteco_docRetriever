@@ -4,12 +4,18 @@ export type Document = {
   status: "queued" | "processing" | "ready" | "failed";
   stage: string;
   error: { code: string; message: string; retryable: boolean } | null;
-  warnings: { page_number: number; code: string; message: string }[];
+  warnings: { page_number?: number; record_number?: number; column?: string; code: string; message: string }[];
   parsing: null | {
+    kind?: "pdf";
     page_count: number | null;
     evidence_count: number;
     coverage_limited: boolean;
     coverage: Record<"extracted" | "degraded" | "no_text" | "failed", number>;
+  } | {
+    kind: "csv";
+    record_count: number;
+    indexed_record_count: number;
+    price_counts: Record<"valid" | "missing" | "invalid", number>;
   };
 };
 
@@ -18,6 +24,9 @@ export type Evidence = {
   text: string;
   locator: Record<string, unknown>;
   raw_values?: unknown;
+  headers?: string[];
+  price?: string | null;
+  price_status?: "valid" | "missing" | "invalid";
 };
 
 export async function request<T>(
