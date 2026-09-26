@@ -1,6 +1,6 @@
 # SITECO Document Retriever
 
-M0 development foundation is complete. The repository currently contains three standalone migrated modules (rank fusion, lexical retrieval, and tracing) and 10 tracing tests. M2.1.1 adds a validated configuration loader with optional credentials and project-root dotenv resolution. M2.1.2 adds a minimal FastAPI health endpoint and local storage startup checks. M2.1.3–4 verify the shared dependency locks on Windows and Linux and provide a tested backend Docker image. M2.1.5–6 add verified Compose startup and persistent host storage. M2.2.1–2 add persistent upload reception. M2.2.3–4 add the lifecycle and background worker. Actual parsing/indexing, question answering and frontend are not implemented yet.
+The current M2.4 build provides a React/TypeScript document workspace and a FastAPI backend, started together with Docker Compose. Upload PDF/CSV files, inspect processing states and PDF extraction warnings, and restore the material list after refresh. PDF parsing is connected; CSV parsing, embedding, search and answers are still pending. The chat composer is intentionally disabled. A successful PDF parse ends with `retrieval_not_configured`, not a false ready state.
 
 See [development setup](docs/development.md) for Python 3.12 environment creation, pinned dependency installation, and verification commands. See [reuse notes](docs/reuse.md) for provenance and migration boundaries.
 
@@ -63,13 +63,13 @@ creates/checks the configured local runtime directory and SQLite file; health
 success is not an upload/question-answering acceptance result. See the development
 setup for configuration precedence, startup failures and current validation.
 
-## Backend Docker startup (M2.1)
+## Docker startup
 
 Run from the repository root with Docker Desktop using Linux containers. No host
-Python or model keys are needed. Stop any local server using port 8000 first.
+Python, Node.js or model keys are needed. Stop any local server using ports 8000 or 8080 first.
 
 ```powershell
-docker build --target test -t siteco-backend:m21-test -f backend/Dockerfile .
+docker build --target test -t siteco-backend:test -f backend/Dockerfile .
 docker compose up --build --wait --wait-timeout 45
 docker compose ps
 Invoke-RestMethod http://127.0.0.1:8000/api/health
@@ -79,14 +79,18 @@ Invoke-RestMethod http://127.0.0.1:8000/api/health
 docker compose down
 ```
 
-Expect `status=ok`, `version=0.1.0` and a healthy backend. For startup failures,
-run `docker compose logs backend`. The first build runs the Linux tests; Compose
+Open **http://127.0.0.1:8080** for the document workspace. Expect two healthy
+services, and `status=ok`, `version=0.1.0` from `/api/health` through either port.
+For startup failures, run `docker compose logs frontend backend`. The explicit
+test-target build above runs the Linux tests; Compose
 builds the runtime target without test dependencies. Initial builds need internet
 to download the base image and packages; health/startup do not call models.
 
 Compose binds `./data/runtime` to `/app/runtime`; `down` removes the container
 and network while leaving that host directory intact. A later `up --wait`
-reuses it. The backend listens on container port 8000, published only on
+reuses it. The frontend serves static assets and proxies `/api` to the backend;
+it receives no provider keys or runtime-data mount. Set `FRONTEND_PORT` to
+override its loopback host port (default 8080). The backend listens on container port 8000, published only on
 `127.0.0.1:8000`. Set `HOST_PORT` to change the host port and `HOST_DATA_DIR` to
 change the host directory (Windows example: `D:/siteco-runtime`). Relative mount
 paths resolve from the Compose project directory. Container DATA_DIR and APP_PORT
@@ -101,10 +105,42 @@ output when using real credentials; `docker compose config --quiet` validates
 without displaying values. Changing runtime variables requires `up -d` to
 recreate the container, not just `restart`.
 
-M2.1 is validated for basic startup and disk persistence only. Final delivery
-remains separate frontend and backend containers; currently only the backend
-service exists. Upload reception is available; processing and question answering are not yet available.
+M2.4 is validated for the upload/status workspace and two-container proxy.
+Real document-to-ready and question answering remain pending. The frontend
+evidence viewer is tested with controlled ready responses; this is not production
+search acceptance.
 See [development notes](docs/development.md) for acceptance evidence and limits.
+
+## Using the workspace
+
+- Choose PDF/CSV files or drag files onto the page. Use Attach → Choose folder
+  to review supported files before uploading; unsupported/empty/oversized files
+  are listed as skipped. Folder selection depends on browser support; ordinary
+  multi-file selection remains available. Folder drag-and-drop is not supported.
+- Uploads are sent individually. Received means queued, not ready. Do not
+  automatically repeat an upload after a network interruption: refresh the
+  material list first, because the server may already have received it.
+- Open Materials for states, extraction coverage, warnings and eligible retries.
+  Only ready documents can be selected or previewed. The selection lasts for the
+  current page; uploaded files remain on the server. Coverage is not accuracy.
+- History and Settings explain their current limitations. Persistent conversations,
+  personal API key controls, multi-turn answers and original-page highlighting
+  are not implemented in this build.
+
+## Frontend development and browser checks
+
+With Node.js 24 and the backend listening on `127.0.0.1:8000`:
+
+```powershell
+npm ci --prefix frontend --ignore-scripts
+npm run dev --prefix frontend
+npm run build --prefix frontend
+```
+
+Open `http://127.0.0.1:5173`; Vite proxies `/api` to the backend. Build performs
+TypeScript checks before generating static assets. Docker uses the same npm lock.
+See [M2.4 browser checks](docs/development.md#m24-frontend-and-browser-checks)
+for isolated acceptance commands; tests do not call model providers.
 
 ## Upload reception (M2.2.1–2)
 

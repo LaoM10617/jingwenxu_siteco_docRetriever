@@ -1,4 +1,4 @@
-# Backend build allowlist: never send local credentials, data, environments or Git.
+# Build allowlist: never send local credentials, data, environments or Git.
 **
 !backend/
 !backend/Dockerfile
@@ -13,6 +13,16 @@
 !tests/
 !tests/test_tracing.py
 !pytest.ini
+!frontend/
+!frontend/Dockerfile
+!frontend/nginx.conf
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/tsconfig.json
+!frontend/vite.config.ts
+!frontend/index.html
+!frontend/src/
+!frontend/src/**
 **/__pycache__/**
 **/*.pyc
 **/.env*

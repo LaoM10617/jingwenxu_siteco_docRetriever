@@ -1,5 +1,65 @@
 # Development setup
 
+## M2.4 frontend and browser checks
+
+The frontend is React 19.3.0, TypeScript 7.0.2, Vite 8.3.1 and plugin-react
+6.1.1, with exact direct versions and `frontend/package-lock.json`. Windows
+Node 24.19.0/npm 11.17.0 and the pinned Linux Node 24.21.0 image built the same
+lock successfully. The static runtime is nginx 1.30.5; both new base images are
+pinned by digest in `frontend/Dockerfile`. Vite guidance:
+https://vite.dev/guide/ . Registry versions were checked before installation.
+
+Start an isolated pair for browser acceptance (PowerShell, repository root):
+
+```powershell
+$env:HOST_PORT = '18086'
+$env:FRONTEND_PORT = '18087'
+$env:HOST_DATA_DIR = 'D:/Projects/Retrieval_SITECO/tmp/m24-acceptance/runtime'
+docker compose --env-file .env.example -p siteco-m24-acceptance up --build --wait
+npm ci --prefix frontend --ignore-scripts
+$env:M24_BASE_URL = 'http://127.0.0.1:18087'
+$env:M24_PDF = 'D:/Projects/Retrieval_SITECO/data/Brochures/Indoor Lightening/SITECO_Rondel_21_Product_Flyer.pdf'
+$env:M24_REAL_PROXY = '1'
+npm test --prefix frontend
+```
+
+Adapt the two absolute D-drive paths on another machine. Use only an existing
+development PDF, not held-out material. The real-upload test submits the PDF
+twice and leaves independent failed records/files in this isolated runtime.
+It checks receipt, parsing, not-ready evidence access, refresh without resubmission
+and distinct IDs. It expects the current intermediate `retrieval_not_configured`
+result; update this acceptance when real indexing is implemented.
+
+Playwright 1.63.0 uses installed Microsoft Edge (`msedge`) by default; no browser
+download was needed here. Set `PLAYWRIGHT_CHANNEL` for another installed channel.
+Without `M24_PDF`, the real PDF test is explicitly skipped. Without
+`M24_REAL_PROXY=1`, the live proxy-limit test is explicitly skipped. Other tests
+use controlled responses at the existing HTTP seam, not production ready data.
+
+Checks: ready selection by ID; waiting quota; retryability; evidence pagination;
+409 preview rejection; network recovery; directory review/unsupported files;
+drag upload; explicit server rejection without automatic POST retry; polling to
+terminal status while keeping ready selection; mobile Escape/focus behavior.
+Actual proxy checks cover `/api/health`, 404, 415 and the backend's 20 MiB limit
+through nginx. Its 21 MiB request cap allows multipart overhead; backend limits
+remain authoritative. No model calls are made.
+
+Verified separately: Vite on 5173 proxied health to a real backend on 8000;
+replacing only the backend container preserved list/detail metadata and warnings,
+and the still-running nginx resolved the replacement via Docker DNS. All live
+state inspection used HTTP, never a Windows connection to running SQLite.
+
+Stop this isolated preview when no longer needed:
+
+```powershell
+docker compose --env-file .env.example -p siteco-m24-acceptance down
+```
+
+The data directory stays intact. Unset the temporary `HOST_PORT`,
+`FRONTEND_PORT`, `HOST_DATA_DIR` variables before starting the normal workspace.
+Screenshots and test artifacts are ignored. M2.4 proves upload/status and
+two-container integration, not real retrieval, answers or complete M2 acceptance.
+
 M0 provides three standalone migrated modules, one tracing test file, and a
 minimal Python dependency set. It is not a running document-chat application.
 
