@@ -1,0 +1,39 @@
+# Local materials, runtime data, and temporary output
+/private/
+/data/
+/tmp/
+/requirements_draft.md
+
+# Local environment variables; keep shareable examples
+.env
+.env.*
+!.env.example
+
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Frontend dependencies and build output
+node_modules/
+/frontend/dist/
+*.tsbuildinfo
+
+# Automated test output
+coverage/
+playwright-report/
+test-results/
+
+# Runtime logs and operating system files
+*.log
+.DS_Store
+Thumbs.db
+Desktop.ini
