@@ -1,0 +1,2 @@
+# Dependency for the migrated lexical retrieval module.
+rank-bm25==0.2.2

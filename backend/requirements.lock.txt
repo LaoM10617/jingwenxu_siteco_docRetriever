@@ -1,0 +1,4 @@
+# Validated on Windows x64 / Python 3.12.10; Linux validation is pending.
+# Includes the runtime dependency and its transitive dependency.
+numpy==2.5.3
+rank-bm25==0.2.2

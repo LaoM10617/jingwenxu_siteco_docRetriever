@@ -48,7 +48,7 @@
 - 理由：先限定访问范围，保留交付前整理空间；暂不选 public。
 - 分享方向：后续通过 GitHub 用户名或邮箱邀请面试官，接受邀请后访问；个人私有仓库 collaborator 有写权限。当前没有发送邀请或邮件；失败后的替代方式另议。
 - 验证：GitHub 返回 visibility=PRIVATE、isEmpty=true；origin 与目标一致，本地 main 尚无提交。
-- 提交边界：尚未暂存、commit 或 push。首次提交的文件清单、message 与执行时机必须先由用户确认；M0 完成后首次提交仅为候选，不视为已决定。
+- 提交边界：首次提交须先由用户确认。后续确认（2026-09-26）：用户授权 message 为 initialize project structure and development setup 的首次本地提交，已完成 c3bc35c；明确不 push。迁移仅盘点，等待人工 review；当时不授权后续提交或推送；本轮用户另行授权迁移提交与首次 push，见 P-007。
 
 ## P-005：Python 后端与最小开发环境
 
@@ -71,20 +71,32 @@
 - 验证：安装器 Authenticode 状态 Valid，签名者 Python Software Foundation，安装退出码 0；py -3.12 注册成功；全局 Python 3.14.7 保留；项目基础解释器路径、环境隔离、标准库导入、pip 25.0.1、pip check 及 Git 忽略检查通过。
 - 边界：未安装应用依赖、未迁移代码、未修改旧项目环境，未执行 commit/push；安装步骤见 docs/development.md。
 
+## P-007：三个独立模块迁移与 M0 验收范围
+
+- 状态：已确认，2026-09-26；依据用户已完成的人工 review、M0 日志及本轮验收/提交/push 指令。
+- 迁移范围：backend/app/retrieval/fusion.py、backend/app/retrieval/lexical.py、backend/app/services/tracing.py 和 tests/test_tracing.py。其他盘点候选未获批准。
+- Interface：fusion 使用字符串 chunk ID、单路不重复、跨路累加、同分按首次出现排序；lexical 使用 replace_documents 完整快照与 BM25L，返回稳定 chunk ID，采用德英文本/型号分词；tracing 使用深拷贝、保留窗口统计和 nearest-rank P95。
+- 接入约束：调用方负责稳定 chunk ID、合法整数参数和串行索引写入；检索须在最终 top_k 前落实文档范围。迁移不表示这些能力已接入应用。
+- 依赖：移除 jieba；lexical 直接依赖 rank-bm25 0.2.2，传递依赖 NumPy 2.5.3，已在项目 Python 3.12.10 安装并锁定。fusion/tracing 使用标准库。
+- 测试安排：用户明确本阶段仅保留一个正式 tracing 文件（10 个 unittest 用例）；fusion/lexical 正式测试随后续实现补充，本轮仅一次性验收检查。
+- 验证：四个 Python 文件 AST、tracing 10 项、项目环境 fusion/lexical 冒烟与异常保持检查、pip check 通过。未做 Linux、应用集成或端到端验收。
+- 取舍：迁移独立模块并清除旧配置耦合，不整包复制；正式测试分阶段补齐，M0 验收不是最终检索效果或应用质量保证。
+- 注释约定：代码注释与文档字符串使用英语。
+- Git：用户授权检查通过后提交，message 为 Migrate retrieval scripts from other projects，并首次非强制 push 到私有 origin/main；不发送面试官邀请。
+
 ## 已确认测试边界
 
-暂无。M0 涉及首次测试实现时，应提出需要测试的公共接口与关键行为，统一确认后记录。
-文档链接与内容检查不等于已经批准某个应用模块的 TDD 边界。
+T-001（已确认）：TraceRecorder 的 record/recent/summary；覆盖容量淘汰、快照隔离、耗时校验、缺失/零耗时、统计与 P95、读取限制。依据用户审查迁移的 tests/test_tracing.py（10 个用例）。fusion/lexical 正式测试明确延后，见 P-007。
 
 后续每个测试边界记录：标识、公共接口、关键行为、确认依据、相关需求与适用范围。
 范围内新增用例和回归测试持续执行；新增边界再确认。
 
 ## 尚未确定的关键选择
 
-- GitHub 仓库与基础入库范围已确认，见 P-003/P-004；面试官账号、实际邀请和首次提交内容/message/时机待确认。
+- GitHub 仓库与基础入库范围已确认，见 P-003/P-004；面试官账号与实际邀请仍待确认；本轮迁移提交与首次 push 已获授权，见 P-007。
 - React + TypeScript 仍为倾向；Python 后端已确认，后端框架、模型、解析器、索引与 Docker 组织未定。
 - 支持文档范围、来源粒度、多文档范围、多轮与流式策略。
-- 具体迁移模块、公共接口和验收阈值。
+- 其他迁移模块、应用公共接口和验收阈值；已迁移范围见 P-007。
 
 ## 后续记录格式
 
