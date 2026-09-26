@@ -1,87 +1,73 @@
-# 当前交接：M2.7内部回答/引用完成开发小验收，下一步M2.8
+# 当前交接：M2.8聊天与空状态Docker冒烟完成，待M2.9最终审查
 
-2026-09-27检查点更新：用户授权将本轮M2.7改动commit/push，消息为
-Implemented model answer；本提交身份与推送结果以Git记录为准。既有255+10双平台测试
-作为本次代码完成证据，本轮不重复真实模型调用。以下历史摘要中的“未提交”描述提交前状态。
-用户同时调整后续范围：M2.8包含聊天/来源、静态构建/运行配置/README/dockerignore，
-以及独立空runtime经浏览器新上传PDF/CSV的两路Docker冒烟，不借开发索引或答案集。
-密钥只后端运行时注入；两路冒烟不替代M3矩阵。当前先分析方案，不实施M2.8代码。
-该调整覆盖下文旧的“M2.9才做两路闭环”安排；M2最终固定范围双轴审查仍必需。
+2026-09-27。M2.1–M2.8已按各自范围实施/验证。用户明确把两路真实浏览器闭环前移至M2.8。
+M2.9固定范围Standards/Spec审查与修复仍待做；M2尚未最终验收。M3多文档/状态/失败矩阵独立。
 
-2026-09-26。M2.1–M2.6已按各自范围验收；用户先后授权M2.7全部六步，现内部工具、
-生成和引用发布已实现。M2.8问题任务HTTP/聊天UI与M2.9真实Docker浏览器闭环仍待做，
-M2整体未完成。保留一次真实CSV空规划质量失败，不宣称全部问题可靠。
+## 已确认范围与实际实现
 
-## 已确认范围
+P-026：PDF FTS5/BM25+Voyage-4/1024+每文档FAISS+RRF；两路全局20、等权k60/final8，未调参。
+P-027/P-028：结构化条件→范围/schema→确定性工具→证据回答与引用，禁任意SQL/Python。
+Decimal保留原值/单位/条件；PDF计算仍仅独立显式单span、无额外context的安全子集，表格参数
+可以带来源列举，但不自动扩大数值归属计算。引用身份验证不是全部语义正确性的证明。
 
-- P-026：PDF FTS5/BM25+Voyage-4/1024+每文档FAISS+RRF；两路全局20、等权k60、
-  默认8，未调参；语义失败不静默降级。ready完整发布、缓存恢复不重新Embedding。
-- P-027/P-028：模型提严格结构化条件，确定性工具执行；Decimal、白名单、证据绑定，
-  禁任意SQL/Python。精确未命中不模糊替代。部分回答保留可验证事实与缺口。
-- conversation隔离，每轮独立/冻结范围；不送其他会话历史。同会话多轮指代后续。
-- M2.8：202+1–2秒轮询、完整JSON、真实等待状态、聊天和CSV分页。SSE/逐token后置。
-  不自动加持久聊天、自带Key面板、原文高亮。M2.9做Docker闭环及最终双轴审查。
-- 初始问题总截止240秒、Embedding入场最多180秒且受总截止限制、生成每次最多60秒。
-  同步调用协作取消而非立即强杀；M2.8须防迟到worker覆盖终态。nginx120秒为读取间隔。
+新P-029和docs/m28-chat-contract.md：POST /api/questions立即202；GET任务状态；任务绑定
+CSV分页。完整范围先验证，conversation/request_id幂等，异内容409；每轮范围冻结、独立求解。
+不发跨conversation历史，不做多轮指代、持久聊天、SSE、前端自带Key或原文高亮。
+QuestionTasks在现有后端/SQLite：单worker、8等待、1000临时任务、24h保留；240秒总截止含排队，
+独立monitor/读取/发布控制终态。重启未完成任务interrupted，不自动重发；超时不能被迟到覆盖。
+同步SDK仍协作取消，超时worker可占用执行位直到网络返回。每次生成min(60s,剩余时间)，不重试。
 
-## 实际代码与限制
+useChat/ChatThread接原布局：消息、scope快照、真实阶段、分片来源/上下文、警告/省略/CSV分页。
+浏览器当前tab最多50轮临时元数据，刷新只GET；不明POST由用户同ID/内容重发，新会话清空范围。
+conversation标签是本地demo隔离，不是认证。API/任务记录与完整返回字段见契约。
 
-docs/m27-question-contract.md是内部契约。QuestionTools.prepare先验证全ready范围，再执行
-有界路由（PDF/CSV各最多一次）；CSV显式字符串订单、全量计数/首50条、重复来源保留。
-PDF保持原问题检索。EvidenceTools仅从本次证据取数，无调用方直接数值。
-PDF计算初始仅单独显式PRODUCT LABEL: NUMBER UNIT（可带条件），无额外context；
-表格/跨段不自动断言数值归属，证据仍可用于带来源的部分回答/参数列举。
+app.prepare_tokenizer可在普通backend镜像一次性下载校验固定公开tokenizer；宿主helper委托
+同一实现。README写明无宿主Python/Node的Docker流程。双常驻容器和nginx复用，无额外服务。
+密钥仅backend运行时env，白名单构建context不含根Key/材料/runtime；provider日志仅阶段/
+状态/耗时/usage，不记录问题或原文。Embedding等待放行后恢复retrieving阶段。
 
-AnswerService接真实StructuredModel：PDF无需规划调用，CSV/mixed模型规划；草稿分片引用、
-最多一轮10个计算、再最终生成。每问题最多3次模型调用，无自动修复/重试/fallback。
-28k字符完整证据项预算，超出整条省略并计数；保留工具总数及全部返回warnings。
-DocumentService.read_evidence_id按(doc,evidence)回查当前ready来源，只有本轮实际给模型的
-S1…可引用；非法整段丢弃、部分发布/全部失败。文件名/页码/原文后端提供。
-引用存在只是来源身份保证，不是语义正确性的完整证明。
+## 实际验证与保留失败
 
-官方SDK google-genai2.25.0/groq1.7.0、零重试、严格JSON及finish/error处理，详情见
-docs/m27-generation-notes.md。新锁websockets16.1.1兼容genai，其余既有运行pins保留。
-app.state.answers已构造，无新HTTP、前端变化或启动模型调用。
+Windows261tests+10subtests(44.31s)，Linux Docker261+10(36.79s)，镜像siteco-backend:m28-test。
+TypeScript/Vite和两runtime镜像构建通过。最终静态Docker前端13浏览器检查通过、5旧真实
+opt-in跳过；独立新两路真实smoke1项通过(31.7s)。git diff --check通过。
+真实任务/SQLite/HTTP、外部模型与时钟替身覆盖去重/越界/截止/队列/重启/分页/响应性；浏览器
+覆盖等待、引用、刷新、同请求重发、部分结果、警告和重复来源。不是M3完整失败矩阵。
 
-## 验证
-
-Windows255 tests+10subtests（41.87s）、Linux Docker同255+10（35.10s）通过，新增30项
-生成/引用测试；镜像siteco-backend:m27-answer-test。SDK受控HTTP+真实临时存储测边界。
-最终git diff --check、验收脚本py_compile与pip check通过；18091 health及两个容器healthy。
-真实开发结果详见eval/results/m27_answers.md：
-- D09首轮空计划错误需澄清；相同实现第二次正确183,20/01.06.2026，记录1，4.110s。
-  无根因/修复结论；不能把仅合法JSON当正确答案。验收脚本空回答现返回失败。
-- D01正确Incoterms2020，第1页ArticleII.3；7/8证据入上下文，partial，82.672s。
-- D06第2页两型号参数对应，answered，20.937s；保留layout_uncertain，无表格数值运算。
-两份PDF相关页已视觉核对。Gemini5次成功API调用（含空规划），Voyage6次已记录成功
-调用8366tokens；初始记录器漏失败尝试，不能称总调用数。D01慢主要在生成前，离线额度
-表确认provider重试冷却；原错误码未记录，不能直接称429。脚本现补失败/等待日志。
-Gemini真实验证、Groq仅受控HTTP；没有保留题或付费切换。M2.6历史12浏览器检查不能
-当作本轮问答浏览器验收。尚无任务HTTP超时终态或新上传→聊天闭环验证。
+首轮空tmp/m28-docker/runtime中PDF成功、CSV空计划误判需澄清，smoke正确失败；保留记录。
+单次probe支持提示语歧义：已补通用JSON计划/未知订单存在性由精确查询判断的说明，无样本
+硬编码、无改检索参数。不能据少量结果承诺模型规划稳定。随后另建空runtime重做两路成功：
+- PDF ready2.344s/问答20.693s，0MD5307L1830=3000K/18W/1.6kg，第2页引用，布局警告保留。
+- CSV ready2.453s/问答3.177s，51DB11EC11B1D=183,20/01.06.2026，逻辑记录1，浏览分页通过。
+两路均从浏览器新上传/现场建索引/真实模型回答，引用展开与刷新通过，截图已核对原文。
+没有读取保留题或复制开发索引/答案集，使用用户已授权原材料/Gemini+Voyage。
+两轮加probe共Voyage4calls/2032tokens、Gemini6calls；无provider失败/重试，首轮CSV为质量失败。
+最终PDF等待观察约16.8秒（1.5秒轮询），成功SDK调用<2秒，主耗时为20秒共享调用间隔。
+详见eval/results/m28_chat.md，原报告和截图在tmp/m28-docker与tmp/m28-clean（忽略）。
+本地核对真实Key未出现在image配置/history或前端静态产物，frontend环境无provider Key。
 
 ## Git与运行
 
-main/本地origin/main检查点a00f896c489c2bdbb6d8b197b2e006166ea727aa；未fetch/commit/push。
-未提交包含M2.7前后三步：questions/question_numbers/answers/generation、来源回查、main
-构造、retrieval回调、依赖锁、4测试文件、开发验收脚本、契约/研究/验收/决策/日志。
-本轮基准a00f896；M2最终审查基准4307e22，届时固定目标及staged/unstaged/untracked范围，
-按AGENTS/code-review执行Standards与Spec并行子代理审查。当前未做该阶段完成审查。
+main/origin/main仍29b308978783d3f214174900eb1ed84f1919b4cf，Implemented model answer，前轮已push。
+本轮M2.8未commit/push。改动含任务模块/HTTP/阶段、规划提示、provider日志、前端聊天/来源、
+Docker内tokenizer入口、README/dockerignore、后端及浏览器测试、P-029/契约/验收/日志。
+M2.8基准29b3089；M2最终审查基准4307e22，必须固定目标且纳入staged/unstaged/untracked，
+按AGENTS/code-review双轴并行子代理。当前未进行该阶段审查，不声称M2最终完成。
 
-现有预览仍M2.6：http://127.0.0.1:18091/，backend18090，Compose siteco-m26-acceptance，
-D:/Projects/Retrieval_SITECO/tmp/m26-docker/runtime。原ready Rondel
-8989ca6429c14f908842ee8a92a8d995。旧18089/18087未改。无新常驻服务。
-本轮独立验收目录tmp/m27-gemini-csv、tmp/m27-gemini-csv-v2、tmp/m27-gemini-pdf，
-进程均已退出/service.stop完成。仅对已停止独立目录只读额度表，未访问运行服务SQLite。
-Docker镜像/缓存C盘、数据D盘不迁移；根目录密钥忽略，不输出/提交/入镜像。
+最新预览 http://127.0.0.1:18095/，backend18094，Compose siteco-m28-smoke，两个healthy。
+数据D:/Projects/Retrieval_SITECO/tmp/m28-clean/runtime。PDF7758b95074074557b8bd2a4b72ef4237，
+CSV eeb7e731107d4759b3dd1d84f0c870ab，均ready。task保留24h，过期后来源文档仍在。
+首轮siteco-m28-acceptance(18093/18092)已停止，tmp/m28-docker/runtime保留失败取证。
+旧siteco-m26-acceptance(18091/18090)未改；不访问运行中SQLite，检查走HTTP。
+Docker镜像/缓存C盘，runtime D盘；不迁移。Key根目录忽略，不输出/提交/入镜像。
+Voyage共享3RPM/10KTPM、至少20秒间隔、query优先；真实调用少量串行，切付费前先通知用户。
 20MiB/PDF50页/CSV20000条/10活跃文档；无OCR/视觉推理/本地模型，108页报告不在基线。
-Voyage共享3RPM/10KTPM、至少20秒间隔、query优先；变付费前通知用户。
 
-默认shell沙箱初始化失败，命令通过require_escalated运行。真实外发初被自动审查拒绝；
-用户随后明确批准Gemini＋Voyage仅D01/D06/D09开发材料验收，后续成功执行。不是待授权。
-Python backend/.venv/Scripts/python.exe；Docker CLI位于LOCALAPPDATA/Programs/DockerDesktop/resources/bin。
+默认shell沙箱初始化失败，命令使用require_escalated。本轮真实验收授权沿用用户明确确认，
+无需再询问同范围外发。Python backend/.venv/Scripts/python.exe；Docker CLI在
+LOCALAPPDATA/Programs/DockerDesktop/resources/bin。临时启动/密钥检查脚本位于tmp，均不含密钥值。
 
 ## 下一步
 
-按已确认M2.8方向接任务HTTP/轮询和聊天UI，展示引用、业务结果、分页/省略/布局警告及
-真实额度等待；总截止从接受问题开始，worker迟到不能改终态。不要把内部答案测试当UI完成。
-随后M2.9真实Docker浏览器新上传→问答，再固定范围Standards/Spec审查与修复。
+M2.9：按固定基准4307e22和明确全工作区范围做Standards/Spec双轴审查、修复、必要回归，
+再确定M2最终验收。两路smoke不能替代M3多文档/处理状态/来源及失败矩阵，不新增候选范围。

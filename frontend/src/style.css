@@ -11,6 +11,20 @@
   --surface: #f3f6f8;
   --error: #a13e31;
 }
+.chat-thread { width: min(100%, 860px); margin: 0 auto; padding: 24px 20px; flex: 1; }
+.chat-turn { margin-bottom: 34px; overflow-wrap: anywhere; }
+.user-question { background: var(--surface); padding: 16px 20px; border-radius: 10px; margin-bottom: 20px; }
+.user-question p, .answer-segment > p { white-space: pre-wrap; }
+.user-question p:last-child { margin-bottom: 0; }
+.model-answer { padding: 0 8px; }
+.answer-segment { margin-bottom: 20px; }
+.answer-source { margin: 8px 0; border-left: 2px solid var(--line); padding: 8px 12px; }
+.answer-source summary { color: var(--accent); }
+.answer-source pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; max-height: 340px; overflow-y: auto; }
+.source-context { color: var(--muted); white-space: pre-wrap; }
+.answer-gap { border-left: 3px solid #a77324; padding-left: 12px; }
+.csv-results { margin-bottom: 20px; }
+textarea:focus-visible { outline: 3px solid #6ba8d3; outline-offset: 3px; }
 * {
   box-sizing: border-box;
 }

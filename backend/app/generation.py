@@ -2,6 +2,7 @@
 from copy import deepcopy
 import json
 import time
+import logging
 
 import httpx
 
@@ -43,6 +44,17 @@ class StructuredModel:
         self._transport, self._now = transport, now
 
     def generate(self, system, payload, schema, budget):
+        start, status = time.monotonic(), 'ok'
+        try:
+            return self._generate(system, payload, schema, budget)
+        except DocumentError as exc:
+            status = exc.code
+            raise
+        finally:
+            logging.getLogger('siteco.providers').info('generation provider=%s model=%s phase=%s status=%s seconds=%.3f',
+                self.provider, self.model, payload.get('phase', 'unknown'), status, time.monotonic() - start)
+
+    def _generate(self, system, payload, schema, budget):
         budget.check()
         if self._key is None:
             raise DocumentError('generation_not_configured', 'Configure the selected generation provider.', 503)

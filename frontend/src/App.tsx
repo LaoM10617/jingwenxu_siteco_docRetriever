@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { fileProblem, request, statusLabel, type Document } from "./api";
 import EvidencePanel from "./EvidencePanel";
+import ChatThread from "./ChatThread";
+import { useChat } from "./useChat";
 
 type Upload = {
   id: number;
@@ -42,6 +44,7 @@ function Icon({ kind }: { kind: "panel" | "file" | "plus" | "arrow" }) {
 }
 
 export default function App() {
+  const chat = useChat();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [listError, setListError] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -481,11 +484,10 @@ export default function App() {
           <section>
             <h2>Conversation history</h2>
             <p className="muted">
-              No conversations yet. Chat will become available when document
-              search and answers are connected.
+              This tab keeps the current conversation temporarily so you can refresh and resume a question.
             </p>
             <p className="muted">
-              Saved conversations are not available in this build.
+              Long-term saved conversations are not available. Each question is answered independently.
             </p>
           </section>
         )}
@@ -505,8 +507,8 @@ export default function App() {
 
       <main inert={sidebar && narrow}>
         <div className="conversation-heading">
-          <span>New conversation</span>
-          <span className="build-note">Upload & prepare</span>
+          <span>Document conversation</span>
+          <button onClick={() => {chat.newConversation(); setSelected([]); setPreview(null);}}>New conversation</button>
         </div>
         {currentPreview ? (
           <EvidencePanel
@@ -514,6 +516,8 @@ export default function App() {
             document={currentPreview}
             close={() => setPreview(null)}
           />
+        ) : chat.chat.turns.length ? (
+          <ChatThread turns={chat.chat.turns} retry={chat.submit} refresh={chat.refresh} />
         ) : (
           <section className="welcome">
             <div className="document-mark">
@@ -549,7 +553,7 @@ export default function App() {
                     ? `${processing.length} processing`
                     : failed.length
                       ? `${failed.length} unavailable — see materials`
-                      : "Select ready materials to ask questions"}
+                      : selected.length ? "Ready to ask about selected materials" : "Select ready materials to ask questions"}
             </span>
           </div>
           {(listError ||
@@ -565,7 +569,9 @@ export default function App() {
           <div className="composer">
             <textarea
               aria-label="Message"
-              disabled
+              value={chat.message}
+              maxLength={8000}
+              onChange={event => chat.setMessage(event.target.value)}
               placeholder="Ask about your documents"
               rows={2}
             />
@@ -586,7 +592,8 @@ export default function App() {
               </details>
               <button
                 className="send-button"
-                disabled
+                disabled={chat.busy || !chat.message.trim() || !selected.length || !!listError || chat.chat.turns.length >= 50}
+                onClick={() => {setPreview(null); chat.send(selected, selected.map(id => documents.find(d => d.document_id === id)?.original_filename || id));}}
                 aria-label="Send message"
               >
                 <Icon kind="arrow" />
@@ -594,7 +601,8 @@ export default function App() {
             </div>
           </div>
           <p className="composer-note">
-            Uploads are available. Search and answers are not connected yet.
+            Each question uses the selected materials independently. Include full product or order numbers.
+            {chat.chat.turns.length >= 50 && ' Start a new conversation to ask more questions.'}
           </p>
         </div>
       </main>

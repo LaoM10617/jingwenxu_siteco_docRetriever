@@ -3,7 +3,8 @@ FROM python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e6
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    DATA_DIR=/app/runtime
+    DATA_DIR=/app/runtime \
+    PYTHONPATH=/app/backend
 WORKDIR /app
 COPY backend/requirements.lock.txt /app/backend/requirements.lock.txt
 RUN python -m pip install --no-cache-dir -r backend/requirements.lock.txt \

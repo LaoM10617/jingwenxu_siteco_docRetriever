@@ -1,6 +1,6 @@
 # SITECO Document Retriever
 
-The current M2.6 build provides a React/TypeScript document workspace and a FastAPI backend, started together with Docker Compose. Upload PDF/CSV files, inspect processing states and extraction warnings, and restore the material list after refresh. Supported price-list CSVs provide exact backend order lookup. Configured PDFs provide SQLite FTS5/BM25 and Voyage/FAISS retrieval with RRF fusion, after complete publication. Chat answers remain pending; the chat composer is disabled.
+The current build provides a React/TypeScript document chat and a FastAPI backend, started together with Docker Compose. Upload PDF/CSV files, wait for ready, select materials and ask a question. PDF answers use FTS5/BM25 and Voyage/FAISS retrieval; supported price-list CSVs use exact order lookup. Answers include source passages, physical page or logical record numbers, and extraction warnings. Check the source and its conditions: ready and retrieval hits do not guarantee completeness or correctness.
 
 See [development setup](docs/development.md) for Python 3.12 environment creation, pinned dependency installation, and verification commands. See [reuse notes](docs/reuse.md) for provenance and migration boundaries.
 
@@ -8,7 +8,58 @@ M2.6 connects a shared quota/cache gateway, per-document FAISS IndexFlatIP,
 atomic PDF publication and scoped hybrid retrieval. See the
 [retrieval contract](docs/m26-retrieval-contract.md) and
 [Docker retrieval acceptance](eval/results/m26_hybrid.md). Retrieval is a backend
-method; there is no production query HTTP endpoint before the M2.7 chat layer.
+method. M2.7 adds grounded answer/citation publication; M2.8 exposes asynchronous
+question tasks and browser chat. See the [task contract](docs/m28-chat-contract.md).
+
+## Ask questions with Docker
+
+Use Docker Desktop with Linux containers. No host Python or Node installation is
+needed for this path. From the repository root, copy `.env.example` to `.env`
+without overwriting an existing configuration. Set an explicit `HOST_DATA_DIR`
+(for example `D:/siteco-runtime`), free loopback ports, `GENERATION_PROVIDER=gemini`,
+`GEMINI_API_KEY`, and `VOYAGE_API_KEY`. Alternatively provide the variables in the
+shell environment. Groq can be selected explicitly with its own key. Keys are
+passed only to the backend at runtime; never put them in frontend variables or
+build arguments. Missing generation credentials produce an explicit question error.
+
+```powershell
+docker compose config --quiet
+docker compose build
+docker compose run --rm --no-deps backend python -m app.prepare_tokenizer /app/runtime/tokenizers
+docker compose up -d --wait --wait-timeout 60
+```
+
+The one-off command downloads and checksum-verifies only the pinned public tokenizer
+JSON. It does not load a model, copy an index or send documents. It exits before the
+two long-running services start. Download failure is explicit; resolve network or
+directory permissions and rerun the command. Runtime directory ownership must allow
+the backend container user (UID 10001) to write it on Linux hosts.
+
+Open the configured frontend port (default http://127.0.0.1:8080), upload a supported
+PDF or CSV, wait for ready and select it in Materials. Ask a question with explicit
+product/order numbers. The browser polls task status and shows complete answers,
+partial results, clarification, exact misses and execution failures separately.
+Expand each citation to inspect original text and context. CSV record browsing
+does not regenerate the answer or imply it summarized all matching rows.
+
+Each question is independent. New conversation clears the current turns and scope;
+no previous-conversation history is sent to retrieval or generation. Per-tab temporary
+request metadata supports refresh without resubmitting. Server tasks expire after
+24 hours; unfinished tasks become interrupted on backend restart and are not retried
+automatically. This is a single-user local demo, not an authenticated multi-user service.
+
+Voyage ingestion/query share 3RPM/10KTPM. Waiting can dominate latency. Question
+deadline is 240 seconds including queueing, with at most 60 seconds per generation
+call; late answers cannot overwrite timeout. Socket I/O is cooperatively stopped,
+so a timed-out worker may take time to return. Do not blindly resubmit after a
+connection error: use “Check / resend same request” to retain the idempotency key.
+Use a new question for a terminal failure. Uploads and ready documents remain usable.
+
+For a clean smoke check, use a new empty HOST_DATA_DIR and a separate Compose project
+(`docker compose -p siteco-smoke ...` on every command). Confirm an empty material
+list; upload a PDF, ask and check its source, then start a new conversation and repeat
+with a price-list CSV. Do not copy an existing database, vectors, embedding cache or
+answers. A successful pair is only a basic smoke check, not the M3 acceptance matrix.
 
 ## Planned directory structure
 
@@ -115,18 +166,18 @@ recreate the container, not just `restart`.
 M2.4 validates the upload/status workspace and two-container proxy. M2.5 adds
 real CSV upload-to-ready, evidence pagination, exact order lookup and restoration
 after container recreation. M2.6 adds PDF ready publication and backend hybrid
-retrieval; question answering remains pending.
+retrieval. Current question tasks and chat are described above.
 See [CSV contract](docs/m25-csv-contract.md) and [acceptance](eval/results/m25_csv.md).
 See [development notes](docs/development.md) for acceptance evidence and limits.
 
 ### Enable PDF indexing
 
 Set `VOYAGE_API_KEY` only for the backend. Keep `EMBEDDING_MODEL=voyage-4`.
-Prepare the pinned tokenizer JSON once in the host runtime directory before
-uploading PDFs (use the same directory as `HOST_DATA_DIR`):
+Prepare the pinned tokenizer JSON once through the backend image before uploading
+PDFs (it writes to the same HOST_DATA_DIR bind mount):
 
 ```powershell
-& ./backend/.venv/Scripts/python.exe scripts/prepare_voyage_tokenizer.py D:/Projects/Retrieval_SITECO/data/runtime/tokenizers
+docker compose run --rm --no-deps backend python -m app.prepare_tokenizer /app/runtime/tokenizers
 ```
 
 Replace the example destination with your actual `HOST_DATA_DIR/tokenizers/`.

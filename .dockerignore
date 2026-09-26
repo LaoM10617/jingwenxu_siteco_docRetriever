@@ -1,4 +1,5 @@
 # Build allowlist: never send local credentials, data, environments or Git.
+# app/** includes the question worker and tokenizer CLI; eval reports stay excluded.
 **
 !backend/
 !backend/Dockerfile

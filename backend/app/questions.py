@@ -66,7 +66,7 @@ class QuestionTools:
     def __init__(self, documents, retriever):
         self.documents, self.retriever = documents, retriever
 
-    def prepare(self, request, *, planner=None, budget=None, on_wait=None):
+    def prepare(self, request, *, planner=None, budget=None, on_wait=None, on_stage=None):
         budget = budget if budget is not None else QuestionBudget()
         budget.check()
         request = validated(QuestionRequest, deepcopy(request), 'invalid_question')
@@ -116,6 +116,8 @@ class QuestionTools:
             result['unresolved'].append({'code': 'needs_clarification'})
         for tool in plan.tools:
             budget.check()
+            if on_stage:
+                on_stage('retrieving' if isinstance(tool, PdfLookup) else 'querying_csv')
             ids = list(dict.fromkeys(tool.document_ids))
             if isinstance(tool, CsvLookup):
                 output = self.documents.lookup_orders(tool.order_ids, ids, limit=50)
@@ -126,7 +128,8 @@ class QuestionTools:
                     result['unresolved'].append({'code': 'results_paginated', 'total': output['total']})
             else:
                 try:
-                    output = self.retriever.retrieve(request.question, ids, stop=budget, on_wait=on_wait)
+                    callbacks = {'on_start': lambda: on_stage('retrieving')} if on_stage else {}
+                    output = self.retriever.retrieve(request.question, ids, stop=budget, on_wait=on_wait, **callbacks)
                 except DocumentError:
                     budget.check()
                     raise

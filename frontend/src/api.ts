@@ -29,6 +29,10 @@ export type Evidence = {
   price_status?: "valid" | "missing" | "invalid";
 };
 
+export class HttpError extends Error {
+  constructor(message: string, public status: number) { super(message); }
+}
+
 export async function request<T>(
   path: string,
   init: RequestInit = {},
@@ -46,16 +50,17 @@ export async function request<T>(
     if (init.signal?.aborted) throw error;
     throw new Error(
       init.method === "POST"
-        ? "Connection interrupted. Check the material list before trying again; the server may have received your request."
+        ? "Connection interrupted. The server may have received your request. Check its status before starting a new request."
         : "Cannot reach the server. The displayed list may be out of date.",
     );
   }
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    throw new Error(
+    throw new HttpError(
       typeof body?.error?.message === "string"
         ? body.error.message
         : `Request failed (${response.status}). Please try again later.`,
+      response.status,
     );
   }
   return response.json();

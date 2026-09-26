@@ -138,7 +138,7 @@ class EmbeddingGateway:
         except (ValueError, TypeError, OverflowError):
             raise EmbeddingError('embedding_invalid_vectors') from None
 
-    def embed(self, texts, input_type, *, stop=None, on_wait=None):
+    def embed(self, texts, input_type, *, stop=None, on_wait=None, on_start=None):
         if (not isinstance(input_type, str) or input_type not in PREFIXES or not isinstance(texts, list) or not texts
                 or any(not isinstance(t, str) or not t.strip() for t in texts)):
             raise EmbeddingError('embedding_invalid_input')
@@ -171,11 +171,14 @@ class EmbeddingGateway:
         if batch:
             batches.append((batch, used))
         for batch, tokens in batches:
+            def call():
+                if on_start:
+                    on_start()
+                return self.provider.embed(batch, model=self.model, input_type=input_type,
+                    output_dimension=1024, output_dtype='float', truncation=False)
             for attempt in range(3):
                 try:
-                    values = self.scheduler.run(lambda: self.provider.embed(batch, model=self.model,
-                        input_type=input_type, output_dimension=1024, output_dtype='float', truncation=False),
-                        tokens, input_type, stop, on_wait)
+                    values = self.scheduler.run(call, tokens, input_type, stop, on_wait)
                     break
                 except EmbeddingError as exc:
                     if exc.retryable:

@@ -34,7 +34,7 @@ class PdfRetriever:
                 raise DocumentError('document_not_pdf', 'PDF retrieval requires PDF documents.', 422)
         return scope
 
-    def retrieve(self, question, document_ids, top_k=8, *, stop=None, on_wait=None):
+    def retrieve(self, question, document_ids, top_k=8, *, stop=None, on_wait=None, on_start=None):
         scope = self._scope(question, document_ids, top_k)
         if self.gateway is None:
             raise DocumentError('retrieval_not_configured', 'Hybrid retrieval is not configured.', 503)
@@ -45,7 +45,8 @@ class PdfRetriever:
             def is_set(self):
                 return lifecycle_stop.is_set() or (stop is not None and stop.is_set())
         try:
-            query = normalize(self.gateway.embed([question], input_type='query', stop=QueryStop(), on_wait=on_wait))
+            callbacks = {'on_start': on_start} if on_start is not None else {}
+            query = normalize(self.gateway.embed([question], input_type='query', stop=QueryStop(), on_wait=on_wait, **callbacks))
         except EmbeddingError as exc:
             from app.documents import ERRORS
             message, retryable = ERRORS.get(exc.code, ERRORS['processing_failed'])

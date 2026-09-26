@@ -4,6 +4,7 @@ from hashlib import sha256
 from pathlib import Path
 import math
 import time
+import logging
 
 from app.embeddings import EmbeddingError, EmbeddingResponse
 
@@ -53,6 +54,19 @@ class VoyageProvider:
         self.last_usage = None
 
     def embed(self, texts, **options):
+        start, status, tokens, retry_after = time.monotonic(), 'ok', None, 0
+        try:
+            response = self._embed(texts, **options)
+            tokens = response.total_tokens
+            return response
+        except EmbeddingError as exc:
+            status, retry_after = exc.code, exc.retry_after
+            raise
+        finally:
+            logging.getLogger('siteco.providers').info('embedding type=%s status=%s tokens=%s retry_after=%s seconds=%.3f',
+                options.get('input_type'), status, tokens, retry_after, time.monotonic() - start)
+
+    def _embed(self, texts, **options):
         from voyageai import error
         try:
             response = self.client.embed(texts, **options)

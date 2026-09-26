@@ -540,5 +540,30 @@ variables before the general browser regression. Never print expanded compose
 configuration or inspect live SQLite from a second process.
 
 This helper is local acceptance tooling, not normal deployment instructions.
-README describes normal startup. Chat generation/transport, strict numeric tools,
-source highlighting and full M2 Docker answering remain pending.
+README describes normal startup. This historical M2.6 result does not cover chat.
+
+## M2.8: asynchronous questions and clean Docker chat
+
+M2.7 supplies internal generation/citations and conservative deterministic numeric
+tools. M2.8 adds /api/questions submission/status and task-bound CSV pagination,
+single-worker bounded execution, independent deadlines, restart interruption and
+temporary SQLite task retention. See docs/m28-chat-contract.md for exact semantics.
+
+Normal Docker startup now supports `python -m app.prepare_tokenizer` inside the
+backend image; the older host Python helper delegates to the same implementation.
+Use README for a build/start sequence without a host Python or Node installation.
+Secrets remain runtime-only backend environment variables; no frontend build vars.
+
+Run backend tests using the existing pytest and Docker test-target commands.
+The frontend suite's chat.spec.mjs uses controlled HTTP and no model calls. For the
+real smoke, explicitly set M24_BASE_URL to a clean isolated deployment, M28_PDF and
+M28_CSV to authorized originals, and M28_OUTPUT to an ignored report directory;
+then run `npx playwright test tests/chat-smoke.spec.mjs`. The test requires an empty
+document list and uploads through browser controls, records task phases/results,
+opens citations, refreshes and browses CSV results. It never imports eval answers
+or copies old runtime indexes. Do not enable old M25/M26 real tests at the same time.
+To run ordinary UI/proxy checks, unset M28_PDF/M28_CSV and enable M24_REAL_PROXY=1
+only when a real Docker proxy is present.
+
+Results and first-attempt failure: eval/results/m28_chat.md. Source highlighting,
+multi-turn reference resolution, M3 matrix and final M2 dual-axis review remain pending.
