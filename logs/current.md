@@ -1,34 +1,33 @@
-# 当前交接摘要
+# 当前交接摘要：M2 对话入口
 
-更新日期：2026-09-26。
+更新日期：2026-09-26。M0、M1 已完成；下一场对话启动 M2。
 
-## 当前目标
+## 已确认目标
 
-M0 已验收，下一步 M1：筛选真实材料，确认第一版支持边界与问题集。尚未开始应用集成。
-
-## 阅读入口与决策
-
-- [M0 日志](m0.md)、[Milestones](../milestones_and_execution_plan.md)、[决策](../decisions.md)、[开发环境](../docs/development.md)、[复用记录](../docs/reuse.md)。
-- P-007 固定三模块迁移范围和接入约束；T-001 为 tracing 正式测试边界。fusion/lexical 正式测试按用户决定随后续实现补齐。
-- 代码注释及文档字符串使用英语。M5 整理面试官可见文档和历史，现阶段保留人工日志。
+先阅读 AGENTS.md、decisions.md 的 P-008/P-009。主线是条款定位、产品参数对比、订单号查价；有文本层且归属明确的简单参数表纳入目标，CSV 精确查询/多订单号对比必做。有限筛选/统计后置；OCR、视觉推理、复杂表格、专用价格格式与 LDT 等不承诺。不要重开已确认范围。
 
 ## Git 检查点
 
-- 分支 main；初始提交与 M0 审查基准 c3bc35c84b71fd5a39f1d2d49f5eb800c427688a。
-- 当前迁移检查点为包含本摘要的提交，message：Migrate retrieval scripts from other projects。范围包括三模块、一个测试文件、两个依赖文件及同步文档。
-- origin：https://github.com/LaoM10617/jingwenxu_siteco_docRetriever；提交前实际核对为 private 空仓库。用户已授权本次 commit 及首次非强制 push，无邀请授权。接手时用 git status 与远程 main 核对实际提交/同步状态。
-- requirements_draft.md、private、data、tmp、.env 和 .venv 继续忽略。
+main；M1 审查基准 b8421e72fd70fb8f62eca93ea39ab4bca8de9690。本摘要随 M1 提交保存，message 为 Confirm parsing targets, validate datasets, and define boundaries.；包含决策、来源结构、材料 manifest、16 题、解析报告与日志。M2 以包含本摘要的提交作为阶段基准，接手时用 git rev-parse HEAD 记录实际哈希并核对未提交内容。
+用户授权本轮 commit，没有授权 push；origin/main 仍为 M0 检查点，接手时核实。原文档 data、private、tmp、需求草案和 .venv 保持忽略。
 
-## 实际验证与限制
+## 完成证据
 
-- 独立 Python 3.12.10 venv；rank-bm25 0.2.2 / NumPy 2.5.3 已安装并锁定，pip check 与安装 dry-run 通过。
-- 四个 Python 文件 AST、tracing 10 个 unittest、fusion/lexical 一次性行为与失败保留快照检查通过。复现入口见 development.md。
-- Docker/WSL2 hello-world、Node/npm 和基础解释器此前验证通过。本次未重复环境安装；未验证 Linux 依赖、项目容器或端到端流程。
-- Python 3.12.10 是本机传统 Windows 安装器版本，安全补丁限制见 P-006；不据此固定最终容器版本。
-- 正式测试仅 tests/test_tracing.py；临时检查不能替代后续回归测试。
+- eval/materials.md 和 eval/material_manifest.json：样本、来源、文件哈希与已知限制。
+- eval/cases/m1_questions.json、README.md：13 开发题和 3 保留题、答案要点、证据位置、执行与保留协议。全部 application_result 为 not_run；不将答案集摄入知识库。
+- eval/results/m1_parsing.md：复用全量文本层/CSV 检查，仅补解析关系验证。默认表格提取漏表头/空表，布局文本保留开发题所需型号/参数关系，但有旋转文字、续行等缺陷。不能声称任意 PDF 表格可靠。
+- docs/sources.md：document_id 与文件名分离；evidence_id 回溯存储证据；物理页码/CSV 记录号、原值与列名；选择文档后再检索或精确查询。
+- 保留 Lunis R 全文和 CSV 末两记录；Apollon/英文销售条款为储备。已扫描/标注，非盲测；禁止后续调参使用，详细协议见 cases/README.md。
 
-## 下一步
+## M2 开场与实施顺序
 
-- M1 检查代表性材料，确认支持格式、语言、来源粒度和问题集，再推进框架/模型/解析选型。
-- 接入迁移模块前补充 fusion/lexical 正式测试，落实稳定 chunk ID、串行索引写入及最终 top_k 前的文档范围过滤。
-- 后续验证 Linux 与 Docker 应用运行；不要把 M0 独立模块通过解释为应用可运行。
+1. 核对提交、文件和 M1 产物；无需重做全量材料盘点或已通过的标注检查。
+2. 确认前后端框架、模型与凭据、最终解析库/依赖、Docker 组织、文件规模/语言限制及必要状态/接口。Python 3.12/pip/venv 已确定；pandas、pdfplumber 和 React 不能仅因讨论被视为已安装/最终选型。
+3. 实现最小解析到证据结构，用开发题验证表头/型号/单位关系；按 AGENTS 确认新增测试接口再实施。fusion/lexical 接入时补正式测试，落实稳定 chunk ID 与 top_k 前范围过滤。
+4. 实现浏览器上传、新文档处理、证据检索或 CSV 精确查询、基于文档回答与引用；验证 Docker 全流程。不要使用预置演示语料替代上传。
+5. 保留题在固定版本后运行，不提前调参；M2 完成按 AGENTS 执行 Standards/Spec 双轴阶段审查。
+
+## 环境与未验证项
+
+项目独立 Python 3.12.10 venv 锁定 rank-bm25/NumPy；分析工具 pypdf 6.10.0、pdfplumber 0.11.9/Poppler 属于工具环境，不是项目依赖。步骤与 Python 补丁限制见 docs/development.md。本轮未启动应用服务、未新增依赖。Linux、完整解析适配器、检索/回答效果、前端与 Docker 应用均未验证。
+详细过程见 logs/m1.md；M1 完成仅表示材料/边界/证据定位准备达到实现入口，不代表应用能力通过。

@@ -1,0 +1,362 @@
+[
+  {
+    "id": "D01",
+    "split": "development",
+    "question": "Welche Incoterms-Fassung ist laut Einkaufsbedingungen maßgeblich?",
+    "allowed_documents": [
+      "terms"
+    ],
+    "expected": [
+      "2020"
+    ],
+    "evidence": [
+      {
+        "document": "terms",
+        "page_number": 1,
+        "section": "Artikel II.3"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  },
+  {
+    "id": "D02",
+    "split": "development",
+    "question": "In welcher Form sind erforderliche Dokumentationsunterlagen zu übergeben?",
+    "allowed_documents": [
+      "terms"
+    ],
+    "expected": [
+      "Elektronisch im PDF-Format; durch den Auftragnehmer."
+    ],
+    "evidence": [
+      {
+        "document": "terms",
+        "page_number": 1,
+        "section": "Artikel II.2"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  },
+  {
+    "id": "D03",
+    "split": "development",
+    "question": "Gelten die AGB des Auftragnehmers automatisch?",
+    "allowed_documents": [
+      "terms"
+    ],
+    "expected": [
+      "Nur soweit der Auftraggeber ausdrücklich schriftlich zugestimmt hat."
+    ],
+    "evidence": [
+      {
+        "document": "terms",
+        "page_number": 1,
+        "section": "Artikel II.1"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  },
+  {
+    "id": "D04",
+    "split": "development",
+    "question": "Compare Highbay 11 midi and maxi dimensions and weight.",
+    "allowed_documents": [
+      "highbay"
+    ],
+    "expected": [
+      "midi: 474 × 442 × 72 mm; 3.7 kg.",
+      "maxi: 946 × 442 × 72 mm; 7.2 kg."
+    ],
+    "evidence": [
+      {
+        "document": "highbay",
+        "page_number": 18,
+        "section": "Highbay 11 midi / maxi: Dimensions, Weight"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  },
+  {
+    "id": "D05",
+    "split": "development",
+    "question": "Do Highbay 11 midi and maxi have the same maximum ambient temperature?",
+    "allowed_documents": [
+      "highbay"
+    ],
+    "expected": [
+      "No. midi: −40 to +70 °C; maxi: −40 to +65 °C."
+    ],
+    "evidence": [
+      {
+        "document": "highbay",
+        "page_number": 18,
+        "section": "Temperature range, each model"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  },
+  {
+    "id": "D06",
+    "split": "development",
+    "question": "Compare Rondel order numbers 0MD5307L1830 and 0MD5307L0940.",
+    "allowed_documents": [
+      "rondel"
+    ],
+    "expected": [
+      "0MD5307L1830: 3000 K, 1800 lm, 18 W, ON/OFF, 1.6 kg.",
+      "0MD5307L0940: 4000 K, 900 lm, 9 W, ON/OFF, 1.6 kg."
+    ],
+    "evidence": [
+      {
+        "document": "rondel",
+        "page_number": 2,
+        "section": "Rondel 21 order variants, rows 2 and 5"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  },
+  {
+    "id": "D07",
+    "split": "development",
+    "question": "What is the part number for the Rondel HF movement sensor?",
+    "allowed_documents": [
+      "rondel"
+    ],
+    "expected": [
+      "5MD53003S; not the luminaire order number."
+    ],
+    "evidence": [
+      {
+        "document": "rondel",
+        "page_number": 2,
+        "section": "Rondel 21 accessories, HF movement sensor"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  },
+  {
+    "id": "D08",
+    "split": "development",
+    "question": "Compare the protection ratings of Rondel 21 and Highbay 11.",
+    "allowed_documents": [
+      "rondel",
+      "highbay"
+    ],
+    "expected": [
+      "Rondel 21: IP40 / IK03.",
+      "Highbay 11 (all sizes): IP66 / IK08."
+    ],
+    "evidence": [
+      {
+        "document": "rondel",
+        "page_number": 2,
+        "section": "Key Specifications: Protection rating"
+      },
+      {
+        "document": "highbay",
+        "page_number": 18,
+        "section": "Technical data Highbay 11 (all sizes)"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  },
+  {
+    "id": "D09",
+    "split": "development",
+    "question": "Welchen Listenpreis und welches Gültigkeitsdatum hat 51DB11EC11B1D?",
+    "allowed_documents": [
+      "prices"
+    ],
+    "expected": [
+      "Listenpreis 183,20; gültig ab 01.06.2026.",
+      "No invented currency, tax or discounted price."
+    ],
+    "evidence": [
+      {
+        "document": "prices",
+        "record_number": 1,
+        "columns": [
+          "Listenpreis",
+          "gültig ab"
+        ],
+        "order_number": "51DB11EC11B1D"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  },
+  {
+    "id": "D10",
+    "split": "development",
+    "question": "Vergleiche Preis und EAN von 51DB11EC11B1D und 51DB11EC11D1D.",
+    "allowed_documents": [
+      "prices"
+    ],
+    "expected": [
+      "Both Listenpreis 183,20.",
+      "EAN: 4069025783196 vs 4069025783219."
+    ],
+    "evidence": [
+      {
+        "document": "prices",
+        "record_number": 1,
+        "columns": [
+          "Listenpreis",
+          "EAN"
+        ],
+        "order_number": "51DB11EC11B1D"
+      },
+      {
+        "document": "prices",
+        "record_number": 2,
+        "columns": [
+          "Listenpreis",
+          "EAN"
+        ],
+        "order_number": "51DB11EC11D1D"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  },
+  {
+    "id": "D11",
+    "split": "development",
+    "question": "What is the exact price of NOT-A-SITECO-ORDER-000?",
+    "allowed_documents": [
+      "prices"
+    ],
+    "expected": [
+      "No exact matching order number in this file; do not substitute a similar order number."
+    ],
+    "evidence": [
+      {
+        "document": "prices",
+        "absence_check": "Exact equality against all 11386 Bestellnummer values; no match."
+      }
+    ],
+    "expected_behavior": "no_match",
+    "application_result": "not_run"
+  },
+  {
+    "id": "D12",
+    "split": "development",
+    "question": "What is the listed price of Highbay 11 midi?",
+    "allowed_documents": [
+      "terms"
+    ],
+    "expected": [
+      "The selected procurement terms do not provide that product price; do not use unselected CSV or general knowledge."
+    ],
+    "evidence": [
+      {
+        "document": "terms",
+        "absence_check": "Full 4-page cached text inspected for product/price evidence; terms-only scope."
+      }
+    ],
+    "expected_behavior": "insufficient_evidence",
+    "application_result": "not_run"
+  },
+  {
+    "id": "D13",
+    "split": "development",
+    "question": "Which directives are checked in this scanned declaration?",
+    "allowed_documents": [
+      "scan"
+    ],
+    "expected": [
+      "Explain that no usable text was extracted and OCR/checkmark interpretation is outside supported scope; do not claim the original contains no directives."
+    ],
+    "evidence": [
+      {
+        "document": "scan",
+        "page_number": 1,
+        "section": "Visible checkboxes; all 3 pages have empty text extraction"
+      }
+    ],
+    "expected_behavior": "unsupported_content",
+    "application_result": "not_run"
+  },
+  {
+    "id": "H01",
+    "split": "holdout",
+    "question": "What are the Lunis R diameter, weight and luminous flux range?",
+    "allowed_documents": [
+      "lunis_holdout"
+    ],
+    "expected": [
+      "380 mm; 2 kg; 2020–4800 lm."
+    ],
+    "evidence": [
+      {
+        "document": "lunis_holdout",
+        "page_number": 4,
+        "section": "Technical data"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  },
+  {
+    "id": "H02",
+    "split": "holdout",
+    "question": "Is recessed Lunis R offered in every listed housing colour?",
+    "allowed_documents": [
+      "lunis_holdout"
+    ],
+    "expected": [
+      "No. Housing lists white, black or silver; recessed only silver."
+    ],
+    "evidence": [
+      {
+        "document": "lunis_holdout",
+        "page_number": 4,
+        "section": "Housing: recessed only silver"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  },
+  {
+    "id": "H03",
+    "split": "holdout",
+    "question": "Vergleiche die Listenpreise von B01S6B4A07145E und B01S7B4A07150E.",
+    "allowed_documents": [
+      "prices"
+    ],
+    "expected": [
+      "2.075,10 and 2.513,30 respectively; decimal values 2075.10 and 2513.30.",
+      "Both effective 01.06.2026; do not invent currency."
+    ],
+    "evidence": [
+      {
+        "document": "prices",
+        "record_number": 11385,
+        "columns": [
+          "Listenpreis",
+          "gültig ab"
+        ],
+        "order_number": "B01S6B4A07145E"
+      },
+      {
+        "document": "prices",
+        "record_number": 11386,
+        "columns": [
+          "Listenpreis",
+          "gültig ab"
+        ],
+        "order_number": "B01S7B4A07150E"
+      }
+    ],
+    "expected_behavior": "answer",
+    "application_result": "not_run"
+  }
+]

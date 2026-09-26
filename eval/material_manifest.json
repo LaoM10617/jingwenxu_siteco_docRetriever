@@ -1,0 +1,58 @@
+{
+  "terms": {
+    "path": "data/Legal Documents/Allgemeine_Einkaufsbedingungen_Siteco-Gruppe_April_2025.pdf",
+    "sha256": "861a1c09f3eac9b85fbb4e430571a4279df9c4211b1d287eab1a0f669cb8cb59",
+    "pages": 4,
+    "split": "development"
+  },
+  "rondel": {
+    "path": "data/Brochures/Indoor Lightening/SITECO_Rondel_21_Product_Flyer.pdf",
+    "sha256": "78a20a04658b46ad947eccce4d96e08f757f348e721b0d8159e5f9f1b7bff561",
+    "pages": 2,
+    "split": "development"
+  },
+  "highbay": {
+    "path": "data/Brochures/Indoor Lightening/SIT_Highbay_11_Broschuere_V_25-132_Update_06_25_EN_RZ_web.pdf",
+    "sha256": "0c8cdbdf8be2f2fb97065ddb1ebcaa62566cc26150f0a07454df60cc8836fb0a",
+    "pages": 22,
+    "split": "development"
+  },
+  "scan": {
+    "path": "data/Legal Documents/Declaration of Conformity(according to Directive 201453EU)/74010623.pdf",
+    "sha256": "440b87c772d2a445c2fdbdf91d9c7997aa6b28e1b5f8c2dcec85c4b77fa672a7",
+    "pages": 3,
+    "split": "development"
+  },
+  "lunis_holdout": {
+    "path": "data/Brochures/Indoor Lightening/SIT_Teaser_Flyer_Lunis_R_V_25-486_RZ_WEB_EN.pdf",
+    "sha256": "f94f484feee79dd5eeea8cf58a622441e8c33ddea0a4e4d27c2c09f898d2e6f4",
+    "pages": 4,
+    "split": "holdout"
+  },
+  "apollon_reserve": {
+    "path": "data/Brochures/Indoor Lightening/SIT_Teaser_Flyer_Apollon_21_V_25-386_EN_RZ_web.pdf",
+    "sha256": "6d4f25847b975c5b1d17c3d962d566d0216efe6024d540d8c4abe7225e4fe5b8",
+    "pages": 4,
+    "split": "holdout"
+  },
+  "sales_reserve": {
+    "path": "data/Legal Documents/Siteco_GmbH_General-Terms-of-Sale.pdf",
+    "sha256": "1e8d3fc4fad9c6fff53e8910a9cf5a00cbbc10bbfeca87e8962b6ebee5f5fa29",
+    "pages": 10,
+    "split": "holdout"
+  },
+  "prices": {
+    "path": "data/Price Lists/leuchten_siteco_LPR_2026_06.csv",
+    "sha256": "b58bcea0e2d5c1e9f0017a25d3f1153bf75c25c0e78dd02a9a711ceb699483b9",
+    "data_records": 11386,
+    "split": "shared_file",
+    "development_records": [
+      1,
+      2
+    ],
+    "holdout_records": [
+      11385,
+      11386
+    ]
+  }
+}
