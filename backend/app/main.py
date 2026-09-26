@@ -12,6 +12,9 @@ from starlette.concurrency import run_in_threadpool
 from app.config import Settings, load_settings
 from app.documents import DocumentService, DocumentError
 from app.uploads import router
+from app.processing import DocumentProcessor
+from app.retrieval.pdf import PdfRetriever
+from app.voyage import configured_gateway
 
 VERSION = "0.1.0"
 
@@ -45,7 +48,9 @@ def create_app(settings: Settings | None = None, *, processor=None) -> FastAPI:
             raise StartupError("SQLite startup check failed; check app.sqlite3, permissions and locks") from None
         try:
             app.state.documents = DocumentService(configuration.data_dir)
-            await run_in_threadpool(app.state.documents.start, processor)
+            gateway = configured_gateway(configuration) if processor is None else getattr(processor, 'gateway', None)
+            app.state.retriever = PdfRetriever(app.state.documents, app.state.documents.lexical, gateway)
+            await run_in_threadpool(app.state.documents.start, processor if processor is not None else DocumentProcessor(gateway))
         except (OSError, sqlite3.Error):
             raise StartupError("Upload storage initialization failed; check permissions and database") from None
         try:

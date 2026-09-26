@@ -1,41 +1,43 @@
-# 当前交接摘要：M2.5全部六步已验收
+# 当前交接：M2.6六步已验收，下一步M2.7
 
-2026-09-26。M2.1基础运行、M2.2上传生命周期、M2.3 PDF证据、M2.4前端/双容器、M2.5 CSV解析与精确查询已验收。M2整体问答闭环尚未完成。
+2026-09-26。M2.1–M2.6各自范围已验收；PDF可完整发布ready并混合检索。聊天/生成/引用工具编排未实施，M2整体和最终双轴审查未完成。
 
-## 已确认依据与约束
+## 决策与下一步
 
-P-010至P-025及实施补充、docs/m2-first-contracts.md、docs/m25-csv-contract.md。T-002至005沿用；T-006 lookup_orders(order_ids, document_ids, offset=0, limit=50)已获用户批准并实现，无需重复确认。用户依次授权M2.5前三步及后三步，本轮完成后三步。
+P-026及docs/m26-retrieval-contract.md：FTS5/BM25+Voyage-4/FAISS+RRF；两路所选范围内全局20候选，等权k60，默认8。来源(document_id,evidence_id)，先校验全范围；无语义错误静默降级。参数为初始值，未调参。
 
-CSV演示/eval限price_list格式：UTF-8可带BOM、分号、固定18列。订单只trim首尾，保留大小写/内部空格/标点/前导零，重复不合并。原值保留，非法/缺失价格无数值，不补零/币种/税率/折扣。SQLite精确索引，无pandas；正式查询HTTP/统一聊天及结果表单留M2.7。不理想查询先记录，不改模糊回退。
+新P-027：M2.7落实LLM生成经schema校验的结构化条件→确定性工具执行。Decimal/白名单字段、操作符、单位；保留原值/单位/来源/依据；不执行任意模型代码或SQL。PDF先确认产品/参数/限定条件归属，缺失/歧义明确说明。下一阶段实施前细化schema和新增测试边界；现有T-004/T-007已批准。
 
-仍保持20MiB、PDF50页、CSV20,000记录、10活跃文件；无OCR/视觉/本地生成模型。保留题不调参，108页报告不在基线。Voyage-4/1024维/3RPM+10KTPM共享预算，付费由用户切换；FAISS按文档IndexFlatIP选定未安装。数据D盘，Docker镜像/缓存C盘；仅后端访问运行中SQLite。
+M2.7需接CSV精确查询、PDF证据、回答/引用和聊天范围，考虑warnings及上下文。处理额度等待的pending/流式传输：当前nginx同步120秒，入场等待上限180秒，不能直接用临时同步验收路由当最终聊天方案。
 
-## 实际实现
+## 实际代码
 
-- 前三步csv_parsing.py通过parse_document(text/csv)分派：固定schema、原值/逻辑记录号/稳定ID、Decimal与warnings，结构错误整份失败。
-- 后三步DocumentProcessor接CSV；CsvStore保存csv_documents/csv_records及(document_id,order_id) BINARY索引，价格无损字符串。摘要与全记录分开，不在状态轮询加载整份CSV。
-- 记录/元数据事务完成，校验版本、数量、连续记录号、digest及摘要后才ready；半成品不可查询，已ready文档保持可读。stop拒迟到发布，retry清旧数据；重启校验持久快照，无解析/模型调用，损坏明确index_restore_failed。
-- 全缺订单号文件csv_no_order_ids失败并保留摘要/warnings；混合缺键记录在证据中保留但不参与订单命中。非法金额可命中并显示原值/状态，不影响其他记录。
-- lookup_orders先检查全部指定文档ready/CSV，精确匹配、多订单顺序/去重、完整计数、明确未命中、来源与稳定分页，limit1–100。重复来源全留，source identity=(document_id,evidence_id)。无通配或近似补结果。
-- 前端CSV显示记录数/可索引数/金额状态和记录warnings，不伪造PDF页数；ready证据分页已补真实成功预览。聊天发送、持久历史、自定义Key仍未开放。
+- pdf_store.py：规范化一次的1024float32、每文档IndexFlatIP；证据/配置JSON、向量BLOB及digest持久化。校验完成后，与FTS/ready同事务发布；半成品不可查。启动重建FAISS/FTS，不解析/Embed；损坏artifact失败隔离，可重试。
+- documents/processing/main：一个gateway和scheduler共享给摄入/查询；无网络/等待中的生命周期锁。完整PDF来源保留text/retrieval_text/context/source_spans/locator，read_evidence走ready门槛。CSV路径不改。
+- retrieval/pdf.py：全范围验证→发布索引快照→query embedding→全局语义top20→重验发布/FTS全局top20→RRF。FAISS枚举文档全部行保证边界同分确定；两路分数后按doc/evidence ID排序。RRF复用词法先、语义后首次出现同分规则；不同上传不去重。无正式query HTTP。
+- 缺Key仍在PDF解析后failed/retrieval_not_configured；缺固定tokenizer/非voyage-4为embedding_configuration_invalid。准备DATA_DIR/tokenizers/voyage-4-tokenizer.json并注入后端Key后重新上传。已ready本地恢复不需Key；执行retrieve需配置gateway（新问题需远程，重复问题可命中缓存）。
+- 既有EmbeddingGateway/BudgetScheduler：3RPM/10KTPM至少20秒间隔、query优先、32待处理、每次等待180秒、4000tokens批次、3次有界尝试、30秒connect/read。持久预算/cooldown/cache，tokenizer固定SHA，无运行时下载；跨客户端额度仍可能429。
 
 ## 实际验证
 
-- Windows/Linux最终全量各132 tests + 10 subtests通过；既有1条Starlette/httpx弃用提示。两平台前端TypeScript/生产构建通过，无新增依赖。
-- 第一条真实CSV生命周期测试先红后绿；随后验收查询范围、前导零/大小写/标点、SQL样式字面量、多订单、重复/分页、注入写后失败与retry、停止/损坏/无解析重启。205重复记录分页100/100/5，无遗漏；高精度金额/带引号换行原值保留。
-- Edge/Playwright共12项独立检查：9受控UI、1真实CSV上传查询、1后端重建一致性、1nginx代理。未重跑旧M2.4真实PDF浏览器测试；后端PDF回归已跑。
-- 完整manifest价格表11386条/18列，0warnings→ready，浏览器证据前两页/选择/刷新通过；只查询开发订单记录1/2与明确不存在sentinel，总命中2、两页各1条，原价183.20。容器重建后状态及查询逐字段一致。未查询/展示保留记录或读取保留题答案。
-- 临时eval/m25_acceptance_app.py只通过验收覆盖挂载、在后端进程内部调用T-006；验收后已按正式Compose移除路由/挂载，HTTP确认404且CSV仍ready。没有正式新增查询API。
-- 验收/复现/局限：eval/results/m25_csv.md。开发订单没有观察到错误命中/漏行；精确变体故意不匹配，未来真实问题先记录。20条完整CSV证据页较长，紧凑聊天结果表单后续实现。
+- Windows/Linux最终各190 tests+10subtests通过（前三步179，本轮新增11）；前端10既有控制/真实代理检查+2新真实PDF检查通过。通用浏览器run跳过5个opt-in场景，两个PDF场景单独执行；旧真实CSV/旧PDF失败上传场景未重跑，后端回归已覆盖。
+- 短开发Rondel原页渲染核对，真实Docker浏览器202→ready，2页17证据，1条layout_uncertain保留，成功预览与刷新通过，补验收M2.4真实PDF ready预览。
+- 开发D06正确表格词法1/语义1/融合1；D07配件表词法2/语义1/融合1。记录标题/泛化候选噪声及宽bbox，未优化参数；未用保留题，非回答准确率评估。
+- 本轮3次真实Voyage调用：摄入15唯一文本+2查询，usage980+31+13，间隔20.038/20.004秒。前三步另2次合成调用，共5次；无重试、生成或付费切换。
+- 后端重建、禁止provider后结果/状态完全一致，调用0。再恢复正式compose入口，health200/验收路由404/原PDF仍ready。详情eval/results/m26_hybrid.md；原始截图/JSON在忽略的tmp/m26-docker。
 
-## Git与运行状态
+## Git与运行环境
 
-main，HEAD047ccf9e943f0b51601d1d60e2cfdb5e5e50d776（M2.4已push）；M2最终审查基准4307e22ceb08b70d6dca459137355b0551f2e6c1。当前未提交包含M2.5前三步既有改动及本轮后三步：CSV解析/存储/查询/接入、前端摘要、测试、eval夹具、契约/README/决策/日志。未commit/push。git diff --check通过（只有已有CRLF转换提示）。
+用户授权将整个M2.6提交并推送main，消息为“Initial completion of indexing.”；本交接随该检查点提交，具体SHA以git log核对，远端同步以git status与origin/main核对（避免在提交中自引用尚未生成的SHA）。提交覆盖模块、接线、测试、依赖锁、工具及文档，密钥/材料/runtime不纳入。M2.6起始基准7a542df896d124470744c9924c8042b4aaeefdc0；M2最终审查基准4307e22。后续阶段开始时以该检查点记录新基准。
 
-新预览Compose siteco-m25-acceptance：frontend http://127.0.0.1:18089，backend18088，D:/Projects/Retrieval_SITECO/tmp/m25-acceptance/runtime，两个健康容器，正式路由，1份完整ready CSV。旧siteco-m24-acceptance仍在18087/18086、原版本、独立runtime；勿把旧预览当新代码。新测试镜像siteco-backend:m25-csv-test。截图/开发记录验收JSON在忽略的tmp/m25-acceptance。
+最新预览：http://127.0.0.1:18091/，backend18090，Compose siteco-m26-acceptance，正式入口，无验收路由；1份ready Rondel（8989ca6429c14f908842ee8a92a8d995）。数据D:/Projects/Retrieval_SITECO/tmp/m26-docker/runtime。旧M2.5在18089/18088、M2.4在18087/18086，均未更新，不要混淆。
 
-PDF仍成功解析后failed/retrieval_not_configured；Embedding、FAISS、回答未实施。本轮无模型调用、密钥读取、运行中SQLite外部打开、数据盘迁移。标准shell需审批升级处理sandbox初始化限制，升级正常，无审批拒绝；浏览器沿用Playwright/Edge。
+仅后端访问运行SQLite；状态检查HTTP。Docker镜像缓存C盘、数据D盘，不迁移。密钥根目录忽略文件，不输出/提交/入镜像。eval/run_m26_docker.py仅显式部署验收helper，需key-file；生产正常配置见README。官方tokenizer保存在忽略runtime，无模型权重。测试镜像siteco-backend:m26-test。
 
-## 下一步
+Shell/CUA默认沙箱曾初始化失败；已授权命令用exec_command require_escalated（自动审查未拒绝）。Python为backend/.venv/Scripts/python.exe。Docker CLI需LOCALAPPDATA/Programs/DockerDesktop/resources/bin。浏览器验收用项目Playwright+Edge。
 
-按既有顺序进入M2.6 PDF检索/Embedding共享额度调度，再M2.7回答与引用/聊天、M2.8完整闭环、M2.9双轴阶段审查。CSV内部精确方法已可被后续经校验的查询计划调用；不能把当前CSV ready当整个M2或问答验收。用户本轮已授权以“Implemented precise CSV lookup.”提交并push；提交结果以Git历史及后续交接更新为准。
+保持20MiB/PDF50页/CSV20000条/10活跃文件，无OCR/视觉/本地模型；108页报告不在基线。下一步先读P-027、当前契约和M2.7入口；勿把检索分数、页面覆盖或ready等同信息完整或回答正确。
+
+## 新对话交接范围
+
+用户将于新对话推进M2.7到M2.9。仓库已明确M2.7入口，但未单独确认M2.8/M2.9细分；先核对milestones、decisions和实际代码，提出后三步分工与小验收，再按已确认范围实施。不要把通用聊天历史、完整多轮改写、流式方式或原文高亮默认为已批准。新接口/关键测试边界统一讨论，常规实现不重复确认。M2完成前仍需真实Docker浏览器新上传→问答及固定范围Standards/Spec双轴审查。

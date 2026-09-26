@@ -1,5 +1,5 @@
 """Processing result contract; concrete parsers and search indexes arrive later."""
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Any
 
 
@@ -24,7 +24,10 @@ class UnavailableProcessor:
 
 
 class PdfParsingProcessor(UnavailableProcessor):
-    """Persist a parse checkpoint, but never pretend that an index exists."""
+    """Persist the parse checkpoint before potentially waiting for embeddings."""
+    def __init__(self, gateway=None):
+        self.gateway = gateway
+
     def prepare(self, path, document, report, stop):
         from app.parsing import parse_document, ParseLimits, ParseError, ParsedDocument
         if not document['original_filename'].lower().endswith('.pdf'):
@@ -37,7 +40,24 @@ class PdfParsingProcessor(UnavailableProcessor):
             report('parsing', parsed=ParsedDocument((), exc.pages, exc.warnings))
             raise ProcessingFailure(exc.code) from None
         report('parsing', parsed=parsed)
-        raise ProcessingFailure('retrieval_not_configured')
+        if self.gateway is None:
+            raise ProcessingFailure('retrieval_not_configured')
+        from app.embeddings import EmbeddingError
+        from app.pdf_store import PreparedPdf
+        evidence = []
+        for entry in parsed.evidence:
+            row = asdict(entry)
+            row['locator'] = {'kind': 'pdf', 'page_number': row.pop('page_number'),
+                              'bbox': row.pop('bbox')}
+            evidence.append(row)
+        report('embedding')
+        try:
+            vectors = self.gateway.embed([e['retrieval_text'] or e['text'] for e in evidence],
+                input_type='document', stop=stop, on_wait=lambda: report('waiting_rate_limit'))
+        except EmbeddingError as exc:
+            raise ProcessingFailure(exc.code) from None
+        report('indexing')
+        return PreparedPdf(evidence, vectors)
 
 
 class DocumentProcessor(PdfParsingProcessor):

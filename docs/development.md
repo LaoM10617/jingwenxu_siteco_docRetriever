@@ -1,5 +1,25 @@
 # Development setup
 
+## M2.6 first three steps
+
+The current runtime lock includes voyageai0.5.0, tokenizers0.23.2 and
+faiss-cpu1.15.1 (69 runtime pins including transitive dependencies). Both
+Windows/Linux full suites pass 179 tests + 10 subtests; pip check and native
+FAISS smoke checks pass. The SDK transitively brings LangChain/LangSmith and
+httpx2; application retrieval does not use their orchestration/tracing or local
+model extras. Existing HTTP tests now use Starlette's available httpx2 path.
+
+Prepare the pinned tokenizer with scripts/prepare_voyage_tokenizer.py and an
+explicit directory under D-drive runtime storage. Only tokenizer.json is fetched,
+verified and loaded; no model weights, runtime downloads or default C-drive
+Hugging Face cache. Do not copy credentials or the tokenizer into the image.
+
+See [contract](m26-retrieval-contract.md), [SDK verification](m26-voyage-notes.md)
+and [acceptance/reproduction](../eval/results/m26_first_three.md). The live smoke
+requires an explicit opt-in and key-file argument; ordinary tests are offline.
+These modules are not wired to production PDF ready or RRF yet. Existing preview
+18089 stays at M2.5; M2.6 test image is siteco-backend:m26-test.
+
 ## M2.4 frontend and browser checks
 
 The frontend is React 19.3.0, TypeScript 7.0.2, Vite 8.3.1 and plugin-react
@@ -487,3 +507,38 @@ Run `backend/.venv/Scripts/python.exe eval/check_m23_pdf.py` for development-sam
 PDF parsing is now wired into the production worker. Parsed evidence, source/context spans, page outcomes and warnings are saved atomically to document_parses, separately from published retrieval artifacts. List/detail return only parsing summaries and warnings; the evidence endpoint remains ready-only. A parsed PDF ends with retrieval_not_configured until embedding/indexing is implemented; CSV remains processing_not_configured. Invalid PDFs have fixed public errors. No parser exception text or internal paths are returned.
 
 Retry clears the previous parse checkpoint; interruption preserves a checkpoint already committed, but late reports cannot overwrite it. Restart does not automatically parse again. Final Windows/Linux: 69 tests + 10 subtests. Real Docker Highbay upload/restart and HTTP summary persistence passed; see eval/results/m23_layout.md. M2.3 is accepted only for PDF-to-evidence/coverage, not ready/query completion.
+
+## M2.6.4–6: production PDF publication and hybrid retrieval
+
+The lifespan now supplies one configured gateway to both the ingestion processor
+and PdfRetriever. Prepare the pinned tokenizer in DATA_DIR/tokenizers and supply
+VOYAGE_API_KEY to the backend. No key still allows startup/CSV and local PDF
+artifact restoration; newly uploaded PDFs report retrieval_not_configured after
+parsing. Invalid tokenizer/model produces embedding_configuration_invalid.
+
+PDF evidence/config and normalized float32 BLOBs persist with a digest; artifact,
+FTS and ready publish in one transaction. Startup validates and reconstructs
+FAISS/FTS without model calls. A query releases lifecycle locks during embedding
+and quota waits, then verifies its selected publications. Global20/20 candidates
+feed equal RRF k60/default8. Strict numeric tool execution is recorded for M2.7.
+
+Final Windows/Linux190 tests+10subtests; browser10 existing checks+2 new real PDF
+checks. See eval/results/m26_hybrid.md for exact route hits and limitations. The
+new opt-in PDF browser tests require M26_PDF or M26_RESTART; neither is enabled
+by default and the normal test suite makes no model calls.
+
+For reproducing the isolated acceptance, eval/run_m26_docker.py accepts up,
+restart-offline, production and an explicit --key-file. It uses ports18090/18091,
+tmp/m26-docker/runtime and an already prepared tokenizer from
+tmp/m26-acceptance/tokenizers. up builds the two containers and mounts the
+acceptance-only adapter; it does not itself upload or query. The PDF browser test
+uses M24_BASE_URL=http://127.0.0.1:18091 and M26_PDF set to the manifest Rondel
+PDF path. restart-offline recreates the backend with provider attempts forbidden;
+run only the restart browser test with M26_RESTART=1. production removes the
+adapter mount/routes, restoring the ordinary compose entry point. Clear opt-in
+variables before the general browser regression. Never print expanded compose
+configuration or inspect live SQLite from a second process.
+
+This helper is local acceptance tooling, not normal deployment instructions.
+README describes normal startup. Chat generation/transport, strict numeric tools,
+source highlighting and full M2 Docker answering remain pending.

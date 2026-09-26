@@ -1,8 +1,14 @@
 # SITECO Document Retriever
 
-The current M2.5 build provides a React/TypeScript document workspace and a FastAPI backend, started together with Docker Compose. Upload PDF/CSV files, inspect processing states and extraction warnings, and restore the material list after refresh. Supported price-list CSVs are parsed, indexed in SQLite and published for evidence preview and exact backend order lookup. PDF embedding/retrieval and chat answers remain pending; the chat composer is disabled. A successful PDF parse ends with `retrieval_not_configured`.
+The current M2.6 build provides a React/TypeScript document workspace and a FastAPI backend, started together with Docker Compose. Upload PDF/CSV files, inspect processing states and extraction warnings, and restore the material list after refresh. Supported price-list CSVs provide exact backend order lookup. Configured PDFs provide SQLite FTS5/BM25 and Voyage/FAISS retrieval with RRF fusion, after complete publication. Chat answers remain pending; the chat composer is disabled.
 
 See [development setup](docs/development.md) for Python 3.12 environment creation, pinned dependency installation, and verification commands. See [reuse notes](docs/reuse.md) for provenance and migration boundaries.
+
+M2.6 connects a shared quota/cache gateway, per-document FAISS IndexFlatIP,
+atomic PDF publication and scoped hybrid retrieval. See the
+[retrieval contract](docs/m26-retrieval-contract.md) and
+[Docker retrieval acceptance](eval/results/m26_hybrid.md). Retrieval is a backend
+method; there is no production query HTTP endpoint before the M2.7 chat layer.
 
 ## Planned directory structure
 
@@ -66,7 +72,8 @@ setup for configuration precedence, startup failures and current validation.
 ## Docker startup
 
 Run from the repository root with Docker Desktop using Linux containers. No host
-Python, Node.js or model keys are needed. Stop any local server using ports 8000 or 8080 first.
+Python, Node.js or model keys are needed for startup or CSV processing. PDF
+indexing requires the configuration below. Stop any local server using ports 8000 or 8080 first.
 
 ```powershell
 docker build --target test -t siteco-backend:test -f backend/Dockerfile .
@@ -107,9 +114,34 @@ recreate the container, not just `restart`.
 
 M2.4 validates the upload/status workspace and two-container proxy. M2.5 adds
 real CSV upload-to-ready, evidence pagination, exact order lookup and restoration
-after container recreation. PDF retrieval and question answering remain pending.
+after container recreation. M2.6 adds PDF ready publication and backend hybrid
+retrieval; question answering remains pending.
 See [CSV contract](docs/m25-csv-contract.md) and [acceptance](eval/results/m25_csv.md).
 See [development notes](docs/development.md) for acceptance evidence and limits.
+
+### Enable PDF indexing
+
+Set `VOYAGE_API_KEY` only for the backend. Keep `EMBEDDING_MODEL=voyage-4`.
+Prepare the pinned tokenizer JSON once in the host runtime directory before
+uploading PDFs (use the same directory as `HOST_DATA_DIR`):
+
+```powershell
+& ./backend/.venv/Scripts/python.exe scripts/prepare_voyage_tokenizer.py D:/Projects/Retrieval_SITECO/data/runtime/tokenizers
+```
+
+Replace the example destination with your actual `HOST_DATA_DIR/tokenizers/`.
+The script places `voyage-4-tokenizer.json` there. This is tokenizer
+data, not model weights; startup never downloads it. Keys, tokenizer and runtime files are not
+baked into images. Recreate the backend after changing its configuration.
+
+Missing keys leave PDF parsing explicitly failed with `retrieval_not_configured`;
+missing/invalid tokenizer or another model yields `embedding_configuration_invalid`.
+Fix configuration and upload again for these non-retryable configuration states.
+Published PDFs restore from local artifacts without embedding calls. New queries
+require query embeddings, unless already cached; retrieval requires configured
+Voyage/tokenizer even when the query is cached. The single shared budget is
+3 RPM/10K TPM with at least 20 seconds between request starts. Waiting is visible
+during ingestion; no paid-plan switch is automatic.
 
 ## Using the workspace
 
@@ -166,9 +198,9 @@ limit; structural errors fail the whole file. Errors include 413 (size),
 (storage unavailable), with `error.code/message/retryable`.
 
 This intermediate build accepts uploads as queued, then its single background
-worker parses PDFs and persists evidence, page coverage and warnings. Successful
-PDF parsing then reports `failed/retrieval_not_configured` because embedding and
-indexing are not connected yet. CSV becomes ready only after all records and the
+worker parses PDFs and persists evidence, page coverage and warnings. With PDF
+configuration present it embeds the evidence and publishes vectors, source
+mapping and FTS together before ready. CSV becomes ready only after all records and the
 exact SQLite index are persisted and validated. Missing/invalid prices retain
 their original values and warnings; they never become numeric zero. A file with
 no searchable order IDs fails explicitly. Status, retry and evidence endpoints are available below.
@@ -177,12 +209,12 @@ The lifecycle supports queued → processing → ready/failed, whole-document
 publication, and explicit manual retry of retryable failures using the same ID.
 On shutdown/restart, unfinished jobs become `processing_interrupted`; they are
 not automatically resumed. Ready artifacts are restored before queries become
-available; restoration failure is explicit. Real CSV restoration is accepted;
-PDF/FAISS success paths still require later-stage acceptance.
+available; restoration failure is explicit. CSV and PDF/FAISS restoration have
+been accepted; corrupt PDF artifacts fail closed and can be retried.
 
 Execution is one process, one bounded in-memory queue and one worker thread.
 Shutdown requests cooperative cancellation and waits up to two seconds; late
-results cannot publish. Future provider calls must use finite timeouts and honor
+results cannot publish. Provider calls use finite timeouts and honor
 cancellation. This is not a durable task queue or an exactly-once guarantee.
 
 ## Document status and evidence (M2.2 accepted)
@@ -222,8 +254,8 @@ Invoke-RestMethod http://127.0.0.1:8000/api/documents/REPLACE_WITH_DOCUMENT_ID
 
 M2.2 acceptance covers upload identity/limits, lifecycle, publication gates,
 interruption and the HTTP contract. Controlled processors prove successful
-publication in tests. M2.3 accepts PDF-to-evidence and durable coverage; production
-PDF processing still stops at retrieval_not_configured. M2.5 accepts real CSV
-document-to-ready and exact lookup; question answering remains pending.
+publication in tests. M2.3 accepts PDF-to-evidence and durable coverage; M2.5
+accepts real CSV document-to-ready and exact lookup. M2.6 accepts configured PDF
+publication, scoped hybrid retrieval and restoration; question answering remains pending.
 Use HTTP to read live state; do not open the
 running container's SQLite database from Windows.

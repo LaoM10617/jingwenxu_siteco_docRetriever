@@ -13,6 +13,7 @@ from threading import RLock, Event, Thread
 from app.processing import PreparedDocument, ProcessingFailure, DocumentProcessor
 from app.csv_parsing import ParsedCsvDocument
 from app.csv_store import CsvStore, summary
+from app.pdf_store import PdfStore, PreparedPdf, PdfIndex, normalize
 from uuid import uuid4
 
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -46,6 +47,9 @@ class DocumentService:
             db.execute('CREATE TABLE IF NOT EXISTS document_artifacts (document_id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS document_parses (document_id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
         self._csv = CsvStore(self.database)
+        self._pdf = PdfStore(self.database)
+        from app.retrieval.pdf import FtsStore
+        self.lexical = FtsStore(self.database)
 
     def reserve(self):
         """Reserve one slot atomically, including requests still receiving bytes."""
@@ -156,10 +160,17 @@ class DocumentService:
             with closing(sqlite3.connect(self.database)) as db, db:
                 db.execute("UPDATE documents SET status='failed', stage='failed', error_code='processing_interrupted', updated_at=? WHERE status IN ('queued','processing')", (self._now(),))
                 ready = db.execute("SELECT document_id FROM documents WHERE status='ready'").fetchall()
+                # Rebuild only from validated, published artifacts before serving.
+                db.execute('DELETE FROM pdf_fts')
             for (document_id,) in ready:
                 try:
                     if self._csv.restore(document_id, self.get(document_id)['parse_result']):
                         self._csv_ready.add(document_id)
+                        continue
+                    pdf = self._pdf.restore(document_id)
+                    if pdf is not None:
+                        self.lexical.replace_document(document_id, pdf[0].evidence)
+                        self._published[document_id] = pdf
                         continue
                     with closing(sqlite3.connect(self.database)) as db:
                         payload = db.execute('SELECT payload FROM document_artifacts WHERE document_id=?', (document_id,)).fetchone()
@@ -192,6 +203,7 @@ class DocumentService:
                        (code, self._now(), document_id))
             self._published.pop(document_id, None)
             self._csv_ready.discard(document_id)
+            db.execute('DELETE FROM pdf_fts WHERE document_id=?', (document_id,))
 
     def _build_index(self, prepared):
         # The concrete adapter additionally validates its vector/CSV schema.
@@ -238,6 +250,22 @@ class DocumentService:
                 document = self.get(document_id)
                 prepared = self._processor.prepare(self.uploads / document['stored_name'], document,
                     lambda stage, **kwargs: self._report(document_id, stage, **kwargs), self._stop)
+                if isinstance(prepared, PreparedPdf):
+                    # Detach evidence and vectors before validation/publication.
+                    prepared = PreparedPdf(json.loads(json.dumps(prepared.evidence, allow_nan=False)),
+                                           normalize(prepared.vectors))
+                    index = PdfIndex(prepared)
+                    with self._lock:
+                        if self._stop.is_set():
+                            continue
+                        with closing(sqlite3.connect(self.database)) as db, db:
+                            self._pdf.write(db, document_id, prepared)
+                            self.lexical.replace_document(document_id, prepared.evidence, connection=db)
+                            changed = db.execute("UPDATE documents SET status='ready', stage='ready', error_code=NULL, updated_at=? WHERE document_id=? AND status='processing'", (self._now(), document_id)).rowcount
+                            if not changed:
+                                raise ProcessingFailure('processing_interrupted')
+                        self._published[document_id] = (prepared, index)
+                    continue
                 if isinstance(prepared, ParsedCsvDocument):
                     self._csv.stage(document_id, prepared)
                     if not self._csv.restore(document_id, self.get(document_id)['parse_result']):
@@ -289,6 +317,8 @@ class DocumentService:
             db.execute("UPDATE documents SET status='queued', stage='queued', error_code=NULL, updated_at=? WHERE document_id=?", (self._now(), document_id))
             db.execute('DELETE FROM document_parses WHERE document_id=?', (document_id,))
             self._csv.clear(db, document_id)
+            self._pdf.clear(db, document_id)
+            db.execute('DELETE FROM pdf_fts WHERE document_id=?', (document_id,))
             db.execute('DELETE FROM document_artifacts WHERE document_id=?', (document_id,))
             db.commit()
             self._jobs.put_nowait(document_id)
@@ -307,6 +337,30 @@ class DocumentService:
                 return self._csv.read(document_id, offset, limit)
             prepared, _ = self._published[document_id]
             return json.loads(json.dumps(prepared.evidence[offset:offset + limit]))
+
+    @property
+    def stop_event(self):
+        return self._stop
+
+    def pdf_snapshot(self, document_ids):
+        with self._lock:
+            result = {}
+            for identity in document_ids:
+                document = self.get(identity)
+                published = self._published.get(identity)
+                if document is None or document['status'] != 'ready':
+                    raise DocumentError('document_not_ready', 'The document is not available for queries.', 409)
+                if published is None or not isinstance(published[1], PdfIndex):
+                    raise DocumentError('retrieval_not_configured', 'PDF vectors are not available.', 503)
+                result[identity] = published
+            return result
+
+    def pdf_lexical(self, question, scope, snapshots, limit):
+        with self._lock:
+            current = self.pdf_snapshot(scope)
+            if any(current[key] is not snapshots[key] for key in scope):
+                raise DocumentError('document_not_ready', 'The document publication changed; retry the query.', 409, True)
+            return self.lexical.search(question, scope, limit)
 
     def lookup_orders(self, order_ids, document_ids, offset=0, limit=50):
         if (not isinstance(order_ids, list) or not order_ids
@@ -331,6 +385,18 @@ class DocumentService:
 
 
 ERRORS = {
+    'embedding_configuration_invalid': ('Voyage-4 requires the pinned tokenizer in DATA_DIR/tokenizers.', False),
+    'embedding_authentication_failed': ('Embedding authentication failed; check the backend key.', True),
+    'embedding_rate_limited': ('Embedding quota remained unavailable after bounded retries.', True),
+    'embedding_provider_unavailable': ('Embedding provider timed out or is unavailable.', True),
+    'embedding_provider_error': ('Embedding provider rejected the request.', True),
+    'embedding_invalid_vectors': ('Embedding returned invalid vectors.', True),
+    'embedding_invalid_usage': ('Embedding returned invalid usage information.', True),
+    'embedding_invalid_input': ('Embedding input is invalid.', False),
+    'embedding_input_too_large': ('An evidence chunk exceeds the embedding token budget.', False),
+    'embedding_queue_full': ('Embedding queue is full; retry later.', True),
+    'embedding_wait_timeout': ('Embedding quota wait timed out; retry later.', True),
+    'embedding_interrupted': ('Embedding was interrupted; retry the document.', True),
     'csv_header_invalid': ('CSV headers do not match the supported price-list schema.', False),
     'csv_record_limit': ('CSV exceeds the 20,000 record limit.', False),
     'csv_record_invalid': ('CSV record has the wrong number of fields.', False),
