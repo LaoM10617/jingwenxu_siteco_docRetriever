@@ -7,19 +7,66 @@ The demo combines a React chat interface with a FastAPI retrieval backend.
 The demo now supports pdf and csv files. 
 All evaluation data comes from https://www.siteco.de/metanavigation/downloads
 
+[![SITECO Document Chat demo](assets/demo-preview.png)](siteco_demo.mp4)
+
+[Watch the demo (MP4)](siteco_demo.mp4). The video is stored with Git LFS; to download it after cloning, install Git LFS and run `git lfs pull`. Sample PDF and CSV documents used in testing are included in [test_data/](test_data/); upload them through the application to try it yourself.
+
 ## 2. Repository structure
 
-Repository layout:
+Main folders and selected entry points:
 
 ```text
-backend/          Backend application and tests
-frontend/         Chat interface
-scripts/          Setup utilities
-tests/            Integration and browser tests
-eval/             Evaluation runner, cases and results
-compose.yaml      Docker startup
-.env.example      Configuration template
-README.md
+.
+|-- backend/
+|   |-- app/
+|   |   |-- main.py                    FastAPI entry point and HTTP routes
+|   |   |-- uploads.py, documents.py   Upload handling and document lifecycle
+|   |   |-- processing.py             Ingestion jobs and index publication
+|   |   |-- parsing.py, pdf_layout.py  PDF text extraction and chunking
+|   |   |-- csv_parsing.py             CSV record parsing
+|   |   |-- pdf_store.py, csv_store.py Document indexes and record storage
+|   |   |-- retrieval/                PDF search, lexical ranking and RRF fusion
+|   |   |-- embeddings.py, voyage.py  Embedding provider integration
+|   |   |-- reranking.py              Optional result reranking
+|   |   |-- questions.py, answers.py  Question routing and grounded answers
+|   |   |-- question_tasks.py         Asynchronous question execution
+|   |   |-- memory.py, generation.py  Conversation context and model calls
+|   |   |-- previews.py              Source preview data
+|   |   |-- config.py, runtime_*.py   Configuration and runtime service wiring
+|   |   `-- services/                Request tracing and summary statistics
+|   |-- tests/                       Backend unit and integration tests
+|   |-- requirements*.txt            Python dependencies and lock files
+|   `-- Dockerfile
+|-- frontend/
+|   |-- src/
+|   |   |-- App.tsx, ChatThread.tsx    Workspace and chat interface
+|   |   |-- EvidencePanel.tsx         Retrieved evidence display
+|   |   |-- SourcePreview.tsx         PDF highlights and CSV record previews
+|   |   |-- SettingsPanel.tsx         Model and retrieval settings
+|   |   |-- api.ts, useChat.ts        API client and chat state
+|   |   `-- style.css                Interface styling
+|   |-- tests/                       Playwright browser and integration tests
+|   |-- package.json                 Frontend dependencies and commands
+|   |-- vite.config.ts, nginx.conf   Development and Docker proxy settings
+|   `-- Dockerfile
+|-- eval/
+|   |-- cases/                       Evaluation questions and protocol data
+|   |-- results/
+|   |   `-- m50/
+|   |       `-- run-20260927-ab-01/   Published protocol, traces, scores and reports
+|   |-- run_m50.py                   Evaluation runner
+|   |-- summarize_m50.py             Offline scoring and report generation
+|   |-- material_manifest.json       Evaluation document inventory
+|   `-- README.md                    Evaluation and reproduction instructions
+|-- assets/                          README screenshots
+|-- scripts/                         Tokenizer preparation utility
+|-- tests/                           Request tracing tests
+|-- test_data/                       Sample PDF and CSV documents for manual testing
+|-- siteco_demo.mp4                  Recorded application demo
+|-- compose.yaml                     Docker services and persistent storage
+|-- .env.example                     Environment variables and API key template
+|-- pytest.ini                       Python test configuration
+`-- README.md
 ```
 
 ## 3. Run the application
@@ -70,6 +117,20 @@ docker compose up -d --wait --wait-timeout 60
 
 Open **http://127.0.0.1:8080**. Stop with `docker compose down`.
 
+### Database path mismatches in environment configuration
+
+The implementation persists documents, indexes and question/answer results in the database.
+
+1. The frontend stores the current conversation reference in `sessionStorage`.
+2. Conversations expire after 24 hours.
+3. Restarting the backend interrupts unfinished questions but does not intentionally clear completed question/answer records.
+
+During manual testing from a fresh clone, history was reported missing after restarting the application. Differences in the database paths configured through `DATA_DIR` and `HOST_DATA_DIR` may be involved; the cause has not yet been confirmed.
+
+**Voyage tokenizer path mismatch.** If you see “Voyage-4 requires the pinned tokenizer in DATA_DIR/tokenizers,” check the runtime path configured in `.env` and the tokenizer's actual location. The tokenizer must be at `<DATA_DIR>/tokenizers/voyage-4-tokenizer.json`. During one local setup, the author downloaded it under `data/local-e2e/tokenizers/` while `DATA_DIR` still pointed to `data/runtime`. Align these paths and restart the backend. For Docker, prepare the tokenizer in the runtime directory mounted from `HOST_DATA_DIR`.
+
+![Voyage tokenizer error caused by a runtime path mismatch](assets/voyage-tokenizer-path-error.png)
+
 ## 4. Implemented features
 
 - PDF/CSV upload with processing status.
@@ -77,6 +138,11 @@ Open **http://127.0.0.1:8080**. Stop with `docker compose down`.
 - Questions across selected documents and follow-up conversation memory.
 - Source citations, original PDF page highlighting and CSV record previews.
 - Gemini/Groq configuration, adjustable Top K and optional Voyage reranking.
+
+Current limitations:
+
+- Cross-document comparison and retrieval have not been optimized; searching across multiple documents may introduce additional noise.
+- CSVs currently support only exact order-number lookups. Semantic queries and queries about information absent from the CSV may lead to a loss of conversational context.
 
 ## 5. Evaluation
 
@@ -104,10 +170,12 @@ materials and your own Gemini/Voyage keys. Commands and configuration:
 ## 6. Technical choices and rationale
 
 1. **Scope driven by real documents.** We inspected SITECO materials and focused
-   on three workflows: finding clauses, comparing product specifications, and
-   looking up order prices. Within two days, prioritizing text PDFs, simple
-   parameter tables and a defined CSV format left more time for source accuracy
-   and a working end-to-end demo.
+   on finding clauses, comparing product specifications, and looking up order prices.
+   For image-heavy brochure PDFs, we implemented skipping of image-only pages and
+   pages that fail parsing, returning limited retrieval results with explicit
+   coverage warnings when information is incomplete. Building on this handling,
+   we further optimized the text-PDF retrieval baseline and added simple csv retrieval
+   within the two-day scope.
 
 2. **FastAPI, React and Docker Compose.** FastAPI provides typed API validation
    alongside Python's document-processing ecosystem, while React/TypeScript
@@ -210,3 +278,27 @@ to add robust exception categorization and diagnostic checks for each stage.
   stranded jobs.
 - **Storage retention:** Failed uploads remain on disk without a retention limit.
   Add deletion/expiry and a total storage quota.
+
+### Next optimization priorities
+
+1. **Persistence and recovery.** Make the resolved runtime directory visible and
+   verify document, index and conversation recovery across restarts. Add durable
+   conversation/file history and soft deletion with restoration, keeping database
+   records, source files and indexes consistent.
+2. **UI readability.** Replace long text-heavy interactions with concise answer
+   summaries, comparison views and expandable evidence. Make processing states,
+   missing information and recovery actions easy to distinguish.
+3. **Cross-document comparison.** Retrieve evidence separately for each requested
+   product/document, then align comparable attributes and units before synthesis.
+   Track coverage on both sides and explicitly mark missing values.
+4. **CSV semantic retrieval.** Add schema-aware matching for descriptive fields
+   alongside exact order-number lookup, retaining row-level citations. Ask for
+   clarification when matches are ambiguous and distinguish absent fields from
+   unmatched records.
+5. **Retrieval fusion and ranking.** Evaluate candidate depth, RRF weighting,
+   deduplication and reranking on fixed evidence-labeled queries. Measure evidence
+   recall and complete-question coverage alongside latency and API cost.
+6. **Answer prompting and verification.** Structure evidence by product and check
+   each claim for source support, attribute ownership, qualifiers and exceptions.
+   Extend verification beyond valid citation IDs, and measure unsupported claims
+   and required-fact coverage on the existing evaluation cases.

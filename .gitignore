@@ -59,3 +59,6 @@ Desktop.ini
 !/eval/results/m50/
 /eval/results/m50/*
 !/eval/results/m50/run-20260927-ab-01/
+
+# Include sample documents for delivery and manual testing
+!/test_data/
