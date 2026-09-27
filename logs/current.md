@@ -1,8 +1,8 @@
 # 当前交接：M4.6功能冻结通过，下一步M5.0
 
-2026-09-27。先读AGENTS.md、本文、docs/m46-feature-freeze.md。P-039冻结纪律，P-031–038确认功能范围；原case与需求核对详见冻结文档。正式evaluation/M5尚未完成。
+2026-09-27。先读AGENTS.md、本文、docs/m5-handoff.md、docs/m46-feature-freeze.md。P-039冻结纪律，P-031–038确认功能范围；原case与需求核对详见冻结文档。正式evaluation/M5尚未完成。
 
-版本：本轮本地冻结提交为包含docs/m46-feature-freeze.md及eval/results/m46_source_manifest.json的提交（git log -1可定位）。父提交与远端main仍6bad97827fcb766e8f4aa613fb239e8cb2f34199；本轮不push。原M4.5未提交HTTP413提示修复/2项测试/真实验收记录纳入本次冻结，凭据及private材料不纳入。后续接手仍需实际git status核对。
+版本：冻结代码为7811243937e67e4e4d02854ffc616ad69736204d。本次用户要求以“All features have been frozen; ready for evaluation”提交并推送M5交接文档，目标仍为既有origin/main；提交/推送结果以Git实查为准。本交接提交不改产品代码。M5详细步骤见docs/m5-handoff.md。
 
 审查基准de8487dd25ce5f21127d59395e965686f0005a42，首固定快照a692ecabb28867c1ce3e970345ba4c7840960df8a207df1a46c30fa708536599，二次复核0e7335bcad31ece0f6abd069fd240069fa29e3d455e897e8f65f6a615784dcb8，全部未提交/untracked及继承文件纳入。Standards/Spec各自确认同一P2已关闭，无未解决阻断，收据eval/results/m46_review.md。临时完整副本tmp/m46。
 
