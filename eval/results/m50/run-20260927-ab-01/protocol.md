@@ -1,158 +1,155 @@
-# M5.0 Evaluation 协议 v0.1
+# M5.0 Evaluation Protocol v0.1
 
-2026-09-27。状态：**用户已批准协议A+B及其外发预算（P-040）；C未批准。批准时尚未启动正式评估。**
+2026-09-27. **A+B and their outbound budget were approved (decision P-040); C was not approved. The formal run had not started when approval was recorded.**
 
-本文件与 [逐题清单](m50-casebook.md)、[机器可读题集](../eval/cases/m50_protocol.json) 构成同一协议。依据 P-032/P-039、M5交接及M4.6冻结。新增评分口径与本轮外发预算集中确认；确认前不写成 decisions.md 中的已确认选择。
+Delivery edition: English translation of the approved protocol, with local process-document links replaced by the retained [case set](cases.json). Scoring rules, questions, configurations and budgets are unchanged. The `protocol_sha256` in `manifest.json` identifies the original Chinese bytes, not this translation. The original is available in Git history at `c5421f2:eval/results/m50/run-20260927-ab-01/protocol.md`; the source protocol used by the live runner is at `859447f:docs/m50-evaluation-protocol.md`. The original runtime file used LF except for its final two line endings, which were CRLF; Git normalizes them to LF. Reconstruct those two endings when checking the historical byte hash. All preparation-time statements below describe the original protocol, not the current delivery status.
 
-## 1. 决策摘要
+## 1. Decision summary
 
-建议批准 A（12轮基线与三路检索）+ B（7题同候选重排），C（4题双模型固定证据生成配对）单独选择。A是正式评估主体；B衡量重排检索增益；C只比较生成，不运行第二模型整条规划链路。
+The proposal was to approve A (12 baseline turns and three retrieval routes) and B (reranking the same candidates for seven queries), with C (four paired fixed-evidence generation cases across two models) decided separately. A is the main evaluation. B measures retrieval gains. C compares generation only, not a second model's entire planning pipeline.
 
-需要一次确认：
+The approval covered:
 
-1. 题集、人工证据标准、下述分母/失败计分，以及采用描述性结果而非临时设定一个总准确率及格线。
-2. 执行 A，是否同时执行 B、C。
-3. 相应材料外发给指定供应商、请求次数及合计最高 USD 2 的本次估算预算控制；不升级账户、不启用自动充值、不切换付费档位。账户若要求另行启用付费，暂停确认。
+1. The case set, manually checked evidence standards, denominators and failure scoring below, and descriptive reporting rather than an improvised overall accuracy threshold.
+2. Execution of A and the choice of B/C.
+3. Disclosure of the specified materials to the named providers, request limits and a combined USD2 estimated-cost control. No account upgrades, automatic top-ups or paid-tier changes. If an account requires separate payment activation, pause for approval.
 
-该授权不包括之后 M5 空runtime交付重建的第二次调用，不包括故障修复后的重新评估或人工重试。
+This authorization excludes later clean-runtime M5 delivery acceptance, post-fix reevaluation and manual retries.
 
-## 2. 冻结与本地核对
+## 2. Frozen baseline and local checks
 
-产品代码：7811243937e67e4e4d02854ffc616ad69736204d。交接：6c6d9222b414ac1747c094536fa784b0aa19a3a5。2026-09-27已核对本地main/远端相同、准备前工作区干净；交接提交仅三个文档变动。
+Product commit: `7811243937e67e4e4d02854ffc616ad69736204d`. Handoff commit: `6c6d9222b414ac1747c094536fa784b0aa19a3a5`. On 2026-09-27, local main matched the remote and the working tree was clean before preparation; the handoff changed only three documents.
 
-现有siteco-m28-smoke健康，4份ready；Gemini/Top K8/重排关；Voyage为voyage-4。本次不变更其设置或运行数据库。正式A采用独立evaluation runtime及冻结代码，五份材料全部就绪后开始计分；不复制现有索引/缓存。以后M5验收仍另建空runtime。完整语料库固定，因为FTS5/BM25统计覆盖索引表，即使单题选择范围更小。
+The existing demo was healthy with four ready documents, Gemini, Top K 8, reranking off and voyage-4. Its settings and database must remain untouched. A uses an independent evaluation runtime and frozen code, with all five materials ready before scoring. Existing indexes/caches must not be copied. Later delivery acceptance requires another empty runtime. Fix the complete corpus because FTS5/BM25 statistics cover the index table even when an individual query selects a smaller scope.
 
-五份完整原件（文件路径/完整SHA256见JSON）：采购条款4页、Rondel2页、隐私声明12页、Lunis R4页、完整价格CSV 11,386行。CSV不得裁成目标行。未选Highbay、扫描声明、守则、Apollon、General Terms of Sale；后两份保留，不扩大本轮材料。
+Use five complete originals, with paths and SHA256 values in the case JSON: procurement terms (4 pages), Rondel (2 pages), privacy statement (12 pages), Lunis R (4 pages), and the full 11,386-row price CSV. Do not trim the CSV to target rows. Highbay, scanned declarations, the partner code, Apollon and General Terms of Sale are excluded; the last two remain reserved.
 
-已本地核对五份SHA256；提取并视觉核对条款第1/2页、隐私第5/6/10/11页、Rondel第2页、Lunis第4页；精确读取CSV记录1/2/11385/11386及三个未命中订单。中间核对程序/原页图在ignored tmp/m50。未调用供应商、未运行应用保留题。
+All five hashes were checked locally. Text and rendered pages were inspected for terms pages 1/2, privacy pages 5/6/10/11, Rondel page 2 and Lunis page 4. CSV records 1/2/11385/11386 and the three absent orders were checked exactly. Preparation artifacts were local-only. No provider calls or application holdout questions had run during preparation.
 
-保留污染审计：eval/results、logs、eval脚本中未发现H01/H02/H03或Lunis的应用执行结果；既有M1标注/原文阅读不等于盲测。E10/E11是同一保留PDF的两个相关题；E12是同一已用CSV末两行的弱保留。全部原件曾机器扫描。若执行前发现额外使用记录，应修订split并重新锁定，不悄悄换题。
+A contamination audit found no prior application results for H01/H02/H03 or Lunis in evaluation results, logs or scripts. Earlier annotation/source reading is not blind testing. E10/E11 are two correlated questions from one held-out PDF; E12 is a weak holdout using the last two rows of a previously used CSV. All originals had been machine-scanned. If further prior use is discovered before execution, revise and refreeze the split rather than silently replace questions.
 
-## 3. 题目与执行顺序
+## 3. Questions and execution order
 
-12个计分轮次，10个会话。E03→E04→E05为一条三轮会话；其余各新会话。先E01–E09开发组，再E10–E12保留组；不根据开发结果调参后再跑保留组。所有材料在首题前已入库。
+There are 12 scored turns in 10 conversations. E03 -> E04 -> E05 form one three-turn conversation; all others start a new conversation. Run development E01-E09, then holdout E10-E12, without tuning between groups. Ingest all materials before the first question.
 
-- E01：付款期限开始条件、付款选项及缺陷限定，条款第2页。
-- E02：一般申请与onlyfy不同期限及限定，隐私第5/6/10/11页。
-- E03：两款Rondel订单的色温/光通量/功率/控制/重量，第2页。
-- E04：追问第二款的色温与功率，沿用E03会话与PDF范围。
-- E05：继续问其功率，但范围改为价格CSV；订单在当前文件不存在，不能从历史抄9 W。
-- E06：CSV单订单价格及日期，记录1。
-- E07：CSV双订单价格及EAN，记录1/2。
-- E08：虚构订单精确未命中，不替换成近似订单。
-- E09：条款+CSV多文档部分回答：Incoterms 2020及另一个订单精确未命中。
-- E10：保留Lunis直径、重量、光通量范围，第4页。
-- E11：保留Lunis嵌入式颜色限制，第4页。
-- E12：弱保留CSV两订单价格及日期，记录11385/11386。
+- E01: payment-clock prerequisites, payment options and defect qualifications; terms page 2.
+- E02: different retention periods and qualifications for general applications and onlyfy; privacy pages 5/6/10/11.
+- E03: colour temperature, luminous flux, power, control and weight for two Rondel orders; page 2.
+- E04: follow up on the second luminaire's colour temperature and power, retaining the E03 conversation and PDF scope.
+- E05: continue asking its power, but select only the price CSV. The order is absent in that file; do not copy 9 W from history.
+- E06: one CSV order's price and validity date; record 1.
+- E07: two CSV orders' prices and EANs; records 1/2.
+- E08: exact miss for a synthetic order; no substitution with a similar order.
+- E09: partial answer across terms and CSV: Incoterms 2020 plus an exact miss for another order.
+- E10: held-out Lunis diameter, weight and luminous-flux range; page 4.
+- E11: held-out Lunis recessed-version colour restriction; page 4.
+- E12: weak-holdout CSV prices and dates for two orders; records 11385/11386.
 
-原始德/英文问题逐字见casebook/JSON。E12相对M1明确问日期，使问题与原有标准一致。题目语言不翻译后送模型。
+The case JSON preserves the exact German/English questions. E12 explicitly asks for dates to align the question with its existing reference standard. Do not translate questions before sending them to the model.
 
-若E03/E04失败，仍记录其首次结果；只有应用允许继续时才提交下一轮，否则标dependent_blocked，保留在12轮业务分母内且计0。不注入标准答案修补历史。检索隔离对照的E04使用预先固定查询：原问题后追加换行“Resolved conversational subjects (not evidence): 0MD5307L0940”。此为隔离检索控制，不能冒充真实指代成功。
+If E03/E04 fails, retain the first result and continue only if the application permits it. Otherwise mark subsequent turns `dependent_blocked`, keep them in the 12-turn denominator and score them zero. Never inject reference answers to repair history. The isolated E04 retrieval control appends a newline and `Resolved conversational subjects (not evidence): 0MD5307L0940` to its original question. This fixed control is not evidence of successful live reference resolution.
 
-此12轮不覆盖所有产品验收：无额外OCR/扫描上传、重复订单跨文件、缺价格、刷新/高亮/服务故障实测；相应M3/受控证据只引用旧收据，标明本轮未测。跨PDF比较和独立纯PDF无答案题亦未覆盖；E05覆盖换范围后的证据不足，E09覆盖混合范围部分回答。不能称全功能覆盖。
+These turns do not cover all acceptance requirements: no additional OCR/scanned upload, cross-file duplicate orders, missing prices, refresh/highlighting or service-failure tests. Historical controlled checks may be cited as such, not as tests performed in this run. Cross-PDF comparison and a standalone pure-PDF no-answer case are also absent. E05 covers insufficient evidence after a scope change; E09 covers a mixed-scope partial answer. Do not claim full feature coverage.
 
-## 4. 证据与评分定义
+## 4. Evidence and scoring
 
-证据单元锚定文档哈希+物理页+内容/表格行与表头，不以chunk ID为真值。单元可以由top8内多个片段共同满足；重复片段不重复得分。允许正文、retrieval_text或实际携带的source context中语义等价且主体明确的证据；只出现同页/关键词/数值但缺归属或条件不能满足。等价定位需记录人工理由，不根据结果降低单元要求。
+Evidence units are anchored to document hash, physical page, content/table row and header, not chunk IDs. Multiple top-eight passages may jointly satisfy a unit; duplicate passages do not earn extra credit. Semantically equivalent evidence in body text, retrieval_text or actually supplied source context is acceptable when ownership is explicit. A matching page, keyword or number without the necessary ownership/qualification is insufficient. Record reasons for equivalent locations; do not relax standards after seeing results.
 
-E02的页5/10分别提供章节归属，页6/11提供期限；如返回片段自身已携带准确章节上下文，可同时满足归属单元，无需机械要求另一个chunk。E03必须按订单行归属；概览1.7kg不能替代两条订单行的1.6kg。
+For E02, pages 5/10 establish section ownership and pages 6/11 contain periods. A passage carrying accurate section context may satisfy the ownership unit without requiring a separate chunk. For E03, use the order-specific rows: an overview weight of 1.7 kg cannot replace the two rows' 1.6 kg.
 
-必要事实是casebook中40个二值核对项，符合完整语义得1，否则0；无部分分。数值允许等价小数/单位换算和同义改写，EAN/订单号按字符串完整匹配。各项可能包含不可拆的条件关系，不以句子字数加权。额外错误另记unsupported_claims/contradictions，不能用多答事实抵消。
+The 40 required facts are binary: complete semantic compliance earns one; otherwise zero, with no partial credit. Equivalent decimals, unit conversions and paraphrases are allowed; EANs/order IDs must match complete strings. A fact may contain an indivisible conditional relationship. Do not weight by sentence length. Record additional unsupported claims/contradictions separately; extra correct facts cannot offset them.
 
-评分由评估执行者逐项对照原页/记录，并写score_reason与证据定位；用户可审阅。不是独立人工双盲标注，也不引入LLM裁判作为唯一真值。标注争议单列，不在看到分数后修改分母；若标准确有错误，保留v0.1和原成绩，发布修订及影响范围。
+The evaluator checks each item against original pages/records and records score_reason and evidence locations for review. This is not independent double-blind human annotation, and an LLM judge is not the sole ground truth. Record disputed annotations separately without changing denominators after seeing scores. If a standard is genuinely incorrect, retain v0.1 and its scores and publish the revision and affected scope.
 
-### 4.1 PDF检索
+### 4.1 PDF retrieval
 
-固定正例7轮：E01/E02/E03/E04/E09/E10/E11。开发5轮、保留2轮。必要证据单元共12个：2/4/2/1/1/1/1，开发10、保留2。
+Seven fixed positive rounds: E01/E02/E03/E04/E09/E10/E11; five development and two holdout. Their required-unit counts are 2/4/2/1/1/1/1: 12 total, 10 development and 2 holdout.
 
-- 每题Evidence Recall@8 = 满足单元数/该题必要单元数；主汇总为逐题宏平均（开发5、保留2分别报），附微平均命中/12及开发/10、保留/2。
-- 完整证据命中率@8 = 全部单元满足的题数/7；分组为/5和/2。
-- MRR@8：首个单独满足至少一个完整证据单元的结果rank倒数；前8无此结果为0；宏平均分母7。前8多片段合起来满足但没有单片段完整单元时，Recall可得分而MRR为0；两者不混用。
-- 同时算经过28000字符打包后仍保留的证据覆盖，区分候选缺失、排序损失和上下文遗漏。
-- 无证据的CSV题不进入PDF召回分母；检索失败固定分母计0，并另报失败数，未执行不伪造零检索结果。
+- Per-query Evidence Recall@8: satisfied units / required units. Primary aggregation is query-level macro average, reporting development (5) and holdout (2) separately; also report micro hits/12 and group hits/10 and /2.
+- Complete-evidence hit rate@8: questions satisfying every unit /7, with groups /5 and /2.
+- MRR@8: reciprocal rank of the first single result satisfying at least one entire evidence unit; zero if none of the first eight does so. Macro denominator is 7. If multiple passages jointly satisfy a unit but none does alone, Recall may be positive while MRR is zero.
+- Also score coverage after the 28,000-character context budget, distinguishing candidate absence, ranking loss and context omission.
+- CSV-only questions are excluded from PDF recall. Retrieval failures score zero in the fixed denominator and are counted separately; do not fabricate an empty retrieval response for an unexecuted query.
 
-不强推Precision@8：本轮未对全部候选穷尽标注相关性，避免用未知相关性制造噪声指标。
+Precision@8 is not required because all candidate relevance has not been exhaustively annotated.
 
 ### 4.2 CSV
 
-返回集合的身份为(文档哈希,逻辑记录号)，重复引用同一记录去重计集合分数，另记录重复数。
+A returned record is identified by (document hash, logical record number). Deduplicate repeated citations for set scoring and report duplicates separately.
 
-- 正例E06/E07/E12共3题，正确记录出现次数共5（分别1/2/2）；同一记录在不同题中各算一次。每题Precision=正确交集/实际返回数，Recall=正确交集/正确集合大小；正例空返回时Precision、Recall均0。
-- 汇总同时给3题宏平均和micro precision=总交集/总返回，micro recall=总交集/5；开发2题、3次记录与弱保留1题、2次记录分开报。
-- E05/E08/E09为精确缺失3题：只有查询了正确字面订单、返回空且明确当前文件未命中才通过，正确率分母3。超时/未调用lookup不算正确空集合。E09同时要求PDF部分仍被回答。
-- 重复来源保留在此真实材料集无正例，指标记N/A，不以现有测试通过冒充本轮100%。
+- Positive cases E06/E07/E12 contain five expected record occurrences across three questions (1/2/2). A record repeated across different questions counts once in each question. Per-query Precision = correct intersection / actual returned count; Recall = correct intersection / expected count. Empty positive returns score zero for both per-query metrics.
+- Report three-query macro averages, micro precision = total intersection / total returned, and micro recall = total intersection /5. Separate two development questions (3 occurrences) from one weak holdout (2 occurrences).
+- Exact-miss cases E05/E08/E09 pass only if the correct literal order was queried, returned no records and was explicitly reported absent in the current file. Denominator is 3. Timeout or an unexecuted lookup is not a correct empty set. E09 must also answer the supported PDF part.
+- This material set has no positive duplicate-source case. Report duplicate preservation as N/A, not 100% based on old tests.
 
-### 4.3 回答、引用及业务行为
+### 4.3 Answers, citations and behavior
 
-- 必要事实覆盖：正确事实/40，开发/31，保留/9（文档保留5、同文件保留4）；E05/E08为零事实题，事实覆盖N/A，仍计业务行为。
-- 引用覆盖：具有准确、实际可定位且语义支持引用的正确必要事实/40，同样分组。不仅检查引用ID有效。
-- 引用支持率：被其所引证据支持的“事实主张-引用”对/所有输出的此类对；分母运行后据实际输出生成并公布。无引用为N/A，同时必要事实引用覆盖按实际为0，不能靠不引用得到满分。
-- 单轮严格通过/12：预期行为正确、必要事实全对、要求的引用覆盖完整、无额外错误事实/范围外证据；CSV无根据添加币种、税率、折扣判失败。缺失题可由结构化exact_not_found状态及精确lookup收据表达，无须伪造一个原文引用。
-- 指代正确/2：E04/E05目标均为0MD5307L0940。当前范围遵守/2另计；E05回答历史9 W失败，说明该CSV未找到订单可通过。
-- 负例/部分回答行为/3：E05/E08/E09；全拒答E09或替代一个相似订单均失败。
-- 单独记录unsupported_claims、wrong_attribution、missing_qualification、out_of_scope及每轮原因；不合成掩盖错误的加权总分。
+- Required-fact coverage: correct facts /40; development /31, holdout /9 (document holdout 5, same-file holdout 4). E05/E08 contain zero required facts: fact coverage is N/A, but behavior is still scored.
+- Citation coverage: correct required facts with accurate, locatable and semantically supporting citations /40, with the same splits. Valid citation IDs alone are insufficient.
+- Citation support: supported factual-claim/citation pairs / all output pairs of that kind. Publish the observed denominator. With no citations, support is N/A and required-fact citation coverage remains zero where applicable; silence cannot earn full marks.
+- Strict turn pass /12: correct expected behavior, all required facts correct, complete required citations, no additional false facts or out-of-scope evidence. Unsupported currency/tax/discount additions fail CSV cases. An exact-miss status and lookup receipt can establish absence; do not invent a source citation.
+- Reference resolution /2: E04/E05 must identify 0MD5307L0940. Current-scope compliance /2 is separate. Answering historical 9 W in E05 fails; reporting the order absent from the selected CSV can pass.
+- Negative/partial-answer behavior /3: E05/E08/E09. Entirely refusing E09 or substituting a similar order fails.
+- Record unsupported_claims, wrong_attribution, missing_qualification, out_of_scope and per-turn reasons separately; do not hide them in a weighted composite.
 
-建议不增设“达到80%就算产品合格”一类未论证门槛。评估完成=固定计划逐项留有可审计结果/未执行原因、指标与失败分析齐全；不等于所有场景通过。明确违反已确认必做行为的失败应按P-039讨论阻断与最小修复，原成绩保留。
+No unsupported threshold such as 80% overall accuracy is introduced. Evaluation completion means an auditable result or nonexecution reason for every planned item, complete metrics and failure analysis, not universal success. Violations of required behavior must be assessed for minimal blocker fixes under the freeze rules, while preserving original scores.
 
-## 5. 对照配置
+## 5. Comparison configurations
 
-A：完整12轮Gemini端到端。模型gemini-3.5-flash-lite；PDF为RRF Top K8、重排关；词法/向量各20、等权RRF k60；voyage-4/1024/float、L2归一化与FAISS IndexFlatIP；上下文证据预算28000字符。所有提示/schema/解析参数取冻结源码，记录哈希。温度、seed及thinking未在当前适配器显式设置，保持供应商默认并如实记录，不能称完全确定性。输出上限6000；单次生成60秒、问题总240秒（含等待）。
+**A: twelve-turn Gemini end-to-end baseline.** gemini-3.5-flash-lite; PDF RRF Top K 8; reranking off; 20 lexical and 20 vector candidates; equal-weight RRF k=60; voyage-4/1024/float, L2 normalization and FAISS IndexFlatIP; 28,000-character evidence budget. Prompts, schemas and parsing parameters come from frozen source and are hashed. Temperature, seed and thinking are not explicitly set by the adapter: record provider defaults, not determinism. Output limit 6,000; generation-call timeout 60 seconds; total question budget 240 seconds including waiting.
 
-A的独立检索对照：7个PDF正例用相同固定查询、同一完整语料库、同一向量和索引，比较词法top8、向量top8、RRF top8（21个本地评分结果）。对照提取需要的观测只放evaluation harness，不新增产品HTTP接口或改变检索算法。原始查询先做隔离对照并缓存向量；A之后的同查询缓存命中如实标warm，不冒充冷启动耗时。E04端到端真实resolve查询若不同可发生额外embedding，单独记录，不取代固定查询对照。
+The isolated retrieval comparison uses the same seven fixed queries, complete corpus, vectors and indexes for lexical top8, vector top8 and RRF top8 (21 local scored results). Observability belongs in the harness, not new product HTTP interfaces or altered retrieval algorithms. Fixed queries are embedded first and cached; later cache hits are explicitly warm, not cold-start timing. Live E04 resolution may produce another query embedding, recorded separately without replacing the fixed-query comparison.
 
-B：只对上述7题同一20+20候选去重并集重排，rerank-2.5-lite，最终8。记录候选哈希、输入顺序、排名、5秒预算、是否真实重排或回退。提供策略实际表现（含回退）和成功重排子集，不把回退伪装重排结果。无需为B再跑12轮生成，因此B只能支持检索覆盖增益结论，不能单凭此宣称回答提升。
+**B:** rerank the same deduplicated 20+20 candidate union for each of the seven queries using rerank-2.5-lite, returning eight. Record candidate hashes, input order, ranks, five-second budget and actual rerank/fallback status. Report actual strategy results including fallback and successful-rerank subsets separately. B does not rerun twelve-turn generation, so it supports retrieval-coverage conclusions only, not claims of improved answers.
 
-C：开发E01/E03/E06/E07四题，使用A已实际送入回答阶段的RRF/CSV证据bundle，复制同一字节内容给Gemini与Groq openai/gpt-oss-120b，各一次生成（若提出计算，则允许既有工具后一次回答），最多每模型8次。不传标准答案，不按答案挑片段、不裁剪长输入、不改Top K。A没有产生有效bundle的题记不可配对，不替补。固定ANSWER提示/schema，交替先调用的提供方，保存请求哈希。不存在新检索、指代或规划调用；两个模型结果不混入A的12轮主分数。
+**C (not approved):** use development E01/E03/E06/E07 with the exact RRF/CSV evidence bundle actually supplied to A's answer stage. Copy identical bytes to Gemini and Groq openai/gpt-oss-120b. Each generates once; a calculation request may use the existing tool followed by one final answer, at most eight calls per model. Do not include reference answers, select passages based on answers, trim long inputs or change Top K. Cases without a valid A bundle are unpairable, with no replacements. Fix ANSWER/schema, alternate provider order and preserve request hashes. No new retrieval, resolution or planning calls; C results are excluded from A's main score.
 
-Groq额度可行性以历史8000TPM为已知限制，不能把本地节流当账户额度。保守预检含6000输出保留及输入估计；明确超额度则该题双方均不发出配对调用，记录不可比原因。若仍遇413/429，保留首次失败并停止C等待决定，不通过缩输入或付费切换继续。由此C可能只有少量甚至零个有效配对，必须显示成功配对数/4，不能承诺比较完成。
+Groq feasibility uses the observed 8,000 TPM account limit, not local throttling as evidence of quota. Conservative preflight includes input estimates and 6,000 reserved output tokens. If clearly oversized, send neither side and record noncomparability. On 413/429, retain the first failure and stop C for a decision; do not shrink inputs or change paid tiers. Report successful pairs /4; zero valid pairs is possible.
 
-缓存只涉及应用embedding缓存；不启用显式供应商上下文缓存，供应商自动缓存如可观测则记录，否则unknown。无答案缓存/标准答案注入。单轮只测一次，不做稳定性或显著性声称。端到端12轮按原顺序串行；各对照只比较对应范围，不跨冷暖缓存比速度。
+Caching refers to application query embeddings. No explicit provider context cache or answer cache is enabled, and reference answers are never injected. Record observable automatic provider caching, otherwise unknown. Each turn runs once; make no stability/significance claims. Run the twelve end-to-end turns serially in their original order, and do not compare latency across cold/warm cache conditions.
 
-## 6. 外发范围、请求上限与费用
+## 6. Disclosure, request limits and cost
 
-外发内容：
+Disclosed content:
 
-- Voyage embedding：四份完整PDF解析文本（22页）及固定/实际PDF检索问题，包含证据标题/上下文；CSV不做embedding，原PDF二进制不发送。
-- Voyage rerank（仅B）：上述7题问题与各自最多40个候选文本；可能包含非标准答案的同范围候选。
-- Gemini（A及C）：问题、文档名/元数据、应用有限历史、实际检索证据、CSV选中记录、工具结果及结构化提示；不发送完整CSV、不发送评分答案文件。
-- Groq（仅C）：条款/Rondel的对应候选证据与CSV记录1/2，以及四题问题/提示；不发送Lunis保留材料或隐私声明。
+- Voyage embedding: parsed text from four complete PDFs (22 pages), titles/context and fixed/actual PDF queries. No CSV embedding or original PDF binaries.
+- Voyage rerank (B only): seven queries with up to 40 candidate texts each, including candidates beyond reference-answer evidence within scope.
+- Gemini (A/C): questions, filenames/metadata, bounded history, retrieved evidence, selected CSV records, tool results and structured prompts. No complete CSV or reference-answer file.
+- Groq (C only): corresponding terms/Rondel evidence and CSV records 1/2 with the four questions/prompts. No Lunis holdout or privacy statement.
 
-所有上限以供应商实际发送attempt计，包括失败；预算不能互相挪用来增加题目或重试。
+Count actual outbound attempts, including failures. Category budgets cannot be moved to add questions or retries.
 
-A生成：常规成功路径估计18次；安全上限32次（每轮最多计划/回答/工具后回答，另E04/E05指代共2次；PDF-only无需规划）。分配E01/E02/E03/E10/E11各2，E04为3，E05为4，E06/E07/E08/E09/E12各3，总32。提前返回会减少调用，不能把空余额用于人工重跑。
+A generation: about 18 calls on an ordinary successful path, cap 32. Per-case caps: E01/E02/E03/E10/E11 each 2; E04 3; E05 4; E06/E07/E08/E09/E12 each 3. PDF-only questions need no planning call; E04/E05 include resolution. Early returns do not authorize extra reruns.
 
-A embedding：文档最多24个逻辑batch（每批至多4000计数tokens），每批最多3次既有gateway尝试，即72个发送attempt；query最多14个逻辑请求（7个固定对照+至多7个端到端不同查询），每请求最多3次，即42attempt；合计114。即使达到预算而未全部入库也停止并报告，不扩大额度。实施harness必须在provider边界计数，失败计入，批次实际数记录；无法可靠计数则不能开跑。
+A embedding: at most 24 logical document batches of at most 4,000 counted tokens each, with up to three existing gateway attempts per batch: 72 outbound attempts. Query cap: 14 logical requests (7 controls plus up to 7 distinct end-to-end queries), up to three attempts each: 42 attempts. Combined embedding cap: 114. Stop even if ingestion is incomplete. Count at the provider boundary, retain failures and actual batch counts; do not execute if reliable counting is unavailable.
 
-B：最多7次rerank，零自动/人工重试。C：Gemini最多8、Groq最多8；生成适配器零自动重试。
+B cap: 7 rerank attempts, no retries. C cap: 8 Gemini and 8 Groq calls, no adapter retries. Total caps: A=146, A+B=153, A+B+C=169. These conservative ceilings include embedding retry allowances, not expected usage. No additional Settings probes, debugging or warm-up calls. Authentication failure stops the affected provider block. Retryable embedding errors/429s use only the frozen gateway policy within the run cap; preserve first failures and all subsequent attempts.
 
-因此请求总上限：A=146；A+B=153；A+B+C=169。它们是包含embedding三次尝试的保守上限，不是预计全部用完。不给Settings额外探测/调试/预热调用额度。遇认证失败停止整个相关供应商块；429及可重试embedding错误仅沿冻结gateway有限策略，超过本轮限额即停止；首次失败与后续attempt全部保存。
+Public synchronous-text list prices checked on 2026-09-27, before free credits:
 
-费用核对日期2026-09-27，普通同步文本API、未扣免费余额的公开牌价：
+- Gemini: USD0.30/million input tokens; USD2.50/million output tokens including thinking. [Pricing](https://ai.google.dev/gemini-api/docs/pricing).
+- Groq: USD0.15/million input; USD0.60/million output. [Model page](https://console.groq.com/docs/model/openai/gpt-oss-120b).
+- voyage-4: USD0.06/million; rerank-2.5-lite: USD0.02/million. [Pricing](https://docs.voyageai.com/docs/pricing). Conflicting free-allowance wording was not relied on; assume no free allowance.
 
-- Gemini输入USD0.30/百万tokens、输出含thinking USD2.50/百万：[官方价格](https://ai.google.dev/gemini-api/docs/pricing)。
-- Groq输入USD0.15/百万、输出USD0.60/百万：[官方模型页](https://console.groq.com/docs/model/openai/gpt-oss-120b)。
-- voyage-4 USD0.06/百万、rerank-2.5-lite USD0.02/百万：[官方价格](https://docs.voyageai.com/docs/pricing)。Voyage重排页免费额度文字与表格不一致，预算按无免费额度计算，不声称当前账户免费。
+Estimated-cost controls: generation input, including system/payload/schema and conservative envelope allowance, must be at most 50,000 tokens; output cap is 6,000. Prefer the relevant local tokenizer. Without one, use UTF-8 byte count plus envelope allowance conservatively; pause if the bound cannot be established rather than trim input. Embedding upper bound: 114 x 4,000 = 456,000 tokens. Rerank counts query_tokens x candidate_count plus total candidate tokens, at most 160,000 per attempt, checked before sending.
 
-预算估算控制：每次生成输入（含system/payload/schema及保守封装余量）不得超过50000 token上界；输出6000。输入优先使用对应本地tokenizer，没有可靠tokenizer则用UTF-8字节数加封装余量作保守估计，无法证明边界时暂停而非剪裁。Embedding按114×4000=456000 tokens上界计；重排每次按query_tokens×candidate_count+候选tokens之和，不超过160000，每次发送前本地计数。
+Estimated upper bounds without free credits: about USD0.99 for A, USD1.01 for A+B and USD1.34 for A+B+C. The approved USD2 control leaves accounting/envelope headroom. These are price-based estimates, not invoices or promises of actual spend. Record available usage; missing usage is estimated/unknown, not actual billed cost. Pause if preflight exceeds budget, prices change or request/input bounds cannot be enforced. Free accounts still obey attempt caps; do not activate payment automatically.
 
-在这些边界下：A不扣免费额度估算上界约USD0.99；A+B约USD1.01；A+B+C约USD1.34。建议批准最高USD2作为本次运行预算控制，留计量/封装余量。此为公开单价推算，不是账户真实账单或消费承诺；当前适配器未完整保留生成usage，正式harness需记录可得usage，缺失标estimated/unknown，不能写成实付。若预检估算超预算、单价变化、不能控制请求计数/输入上界，暂停确认。免费账户也受请求次数上限；不主动开通付费。
+## 7. Results and presentation
 
-## 7. 结果文件与展示
+Planned outputs:
 
-计划输出（现在只建协议，不生成虚假结果文件）：
+- manifest.json: versions; protocol, cases, materials and prompt hashes; environment/configuration, cache policy, budget and usage.
+- attempts.jsonl, retrieval.jsonl, answers.jsonl, scores.jsonl: safe per-attempt metadata, candidates/ranks/actual context, original answers/citations and per-fact/evidence judgments with reasons. No keys or authorization headers.
+- summary.json, summary.csv and report.md: grouped denominators, actual paired-model counts, failure attribution and conclusions. Retain safe provider response fields with real usage when available.
+- A local interactive report derived from summaries and per-case files: retrieval comparison, case matrix, model-pair differences, timing/waiting and source locations. No new product page or public hosting.
 
-- eval/results/m50/<run-id>/manifest.json：版本、协议/题集/原件/提示哈希、环境、配置、缓存策略、预算与实际使用。
-- 同目录 attempts.jsonl、retrieval.jsonl、answers.jsonl、scores.jsonl：逐次请求安全元数据、候选/排序/实际上下文、原回答/引用、事实与证据单元逐项评分/理由。不得含Key或请求认证头。
-- summary.json + summary.csv + report.md：分组分母、模型实际配对数、失败归因及结论。原始供应商响应含真实usage时保留安全部分。
-- 从summary与逐题文件生成本地交互报告：检索覆盖对照、逐题矩阵、模型配对差异、耗时/等待分解、原文定位。具体载体实现时以可用本地展示能力为准；不新增产品页面，不发布外网。
+Report actual per-turn timings and medians with success/failure sample counts. Do not silently exclude failure durations. Unobserved stages are unknown, not inferred from total duration. Freeze first-attempt scores; retries or post-fix runs use a new run ID and never overwrite old results.
 
-时间以实际逐题值与中位数展示，含成功/失败分别统计的样本数；失败时长不能从总体静默删去。阶段未观测为unknown，不由总时长倒推。首次提交成绩固定，重试/修复后另run-id，不覆盖旧结果。
+Conclusions apply only to these five materials, twelve turns and frozen configuration. Separate development, document holdout and weak same-file holdout. Correlated E03-E05 turns are not twelve independent statistical samples. No confidence intervals, significance, P95 or universal model leaderboard. Classify retrieval failures as parsing absence, candidate absence, ranking loss or context omission; distinguish end-to-end planning/resolution, generation ownership/qualifications, citation display and provider failures.
 
-结论只适用于这五份材料、12轮和冻结配置。开发、文档保留、同文件弱保留分栏；E03–E05相关会话不当12个独立统计样本。无置信区间/显著性/P95或普遍模型排行榜。检索失败按解析缺失、候选未召回、排序、上下文遗漏拆分；端到端另列规划/指代、生成归属/条件、引用显示及供应商失败。
+## 8. Execution after approval
 
-## 8. 批准后顺序
+Record approved scope and protocol hash, establish a specific post-approval evaluation commit while retaining product baseline 7811243, and implement the minimal local logging/budget harness. First verify counting, stop conditions and no unintended outbound calls using controlled providers at existing test seams. Any necessary new interface boundary must be reviewed before implementation.
 
-记录批准范围与协议哈希到decisions.md；建立M5.0阶段基准为本轮批准后的明确提交（产品基准仍7811243），实现最小本地记录/预算harness并先用受控provider检查零外发、计数/止损；沿既有测试边界，无产品接口扩展。若发现必须新增边界，先展示具体差异再确认。
-
-随后独立runtime按冻结代码准备五份原件、执行A，再按批准范围执行B/C。保留题产生结果后不调参；发现阻断按P-039留原结果、提出最小修复并重新冻结。M5交付重建另列步骤和新外发预算，不消耗本协议剩余额度。
-
+Prepare all five originals in an independent runtime using frozen code; execute A, then approved B/C. Do not tune after holdout results. Preserve blocker results, propose minimal fixes and refreeze before a later run. Clean-runtime delivery acceptance needs its own plan and outbound budget, not unused allowance from this protocol.

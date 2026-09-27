@@ -42,3 +42,20 @@ Desktop.ini
 /Gemini_API_KEY.txt
 /grok.txt
 /voyage.txt
+
+# Local collaboration context and development-stage documentation
+/logs/
+/docs/
+/AGENTS.md
+/CONTEXT.md
+/decisions.md
+/milestones_and_execution_plan.md
+/eval/materials.md
+/eval/cases/README.md
+/eval/m44_prose_protocol.md
+
+# Keep the formal evaluation run; retain other receipts locally only
+/eval/results/*
+!/eval/results/m50/
+/eval/results/m50/*
+!/eval/results/m50/run-20260927-ab-01/
