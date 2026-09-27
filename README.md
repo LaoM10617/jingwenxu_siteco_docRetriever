@@ -24,17 +24,17 @@ the original sequence is not reported as all passing. See the
 [M3 checkpoint](eval/results/m3_checkpoint.md) and
 [integration evidence](eval/results/m35_integration.md) for outcomes and limits.
 
-M4 development validation and improvements are in progress. Local PDF original-page
+M4 functionality has passed its freeze checkpoint; see the [scope, review and validation](docs/m46-feature-freeze.md). Local PDF original-page
 previews with evidence/context regions and CSV record previews are implemented and
 sampled against real citations; see the [M4.3 checkpoint](eval/results/m43_preview.md).
-Settings supports Gemini/Groq model and in-memory Key configuration, Voyage Key configuration, Top K and reranking. See [controlled verification](eval/results/m45_settings.md); live provider revalidation remains pending. The default configuration retains RRF. An
+Settings supports Gemini/Groq model and in-memory Key configuration, Voyage Key configuration, Top K and reranking. See [controlled verification](eval/results/m45_settings.md); Gemini/Voyage passed one live PDF configuration check at Top K 8. Groq/Voyage passed the same question at Top K 1 after an account token-limit failure at Top K 8. See [live acceptance status](eval/results/m45_live_settings.json). The default configuration retains RRF. An
 8-question prose-PDF development comparison increased required evidence in context
 from 10/12 to 11/12, with complete coverage unchanged at 7/8 questions. One subsequent paired answer check recovered the missing retention rule and
 exception. This is a single-case improvement, with an evidence gap still remaining;
 optional reranking is implemented through Settings and a startup environment default (off by default). See the [comparison and remaining check](eval/results/m44_prose_comparison.md).
 Formal numeric
 evaluation is required at M5.0 after feature freeze, with scoring details fixed
-before execution. Multi-model comparison is conditional. Feature freeze, formal
+before execution. Multi-model comparison is conditional. M4 feature freeze is complete; formal
 evaluation and the M5 rebuild/delivery rehearsal are not complete. See
 [P-032](decisions.md#p-032m4开发验证与冻结后正式evaluation分离) and the
 [M4 handoff](docs/m4-handoff.md).
@@ -97,7 +97,7 @@ then checked against the loaded ready documents. Unavailable selections are remo
 with a notice; review Materials before asking. Existing tasks retain their submitted
 scope. This is a single-user local demo, not an authenticated multi-user service.
 
-Voyage ingestion/query share 3RPM/10KTPM. Waiting can dominate latency. Question
+Voyage ingestion/query share the configured local admission budget (defaults: 3 RPM/10K TPM). Settings shows the running limits. Waiting can dominate latency. Question
 deadline is 240 seconds including queueing, with at most 60 seconds per generation
 call; late answers cannot overwrite timeout. Socket I/O is cooperatively stopped,
 so a timed-out worker may take time to return. Do not blindly resubmit after a
@@ -263,8 +263,7 @@ during ingestion; no paid-plan switch is automatic.
   Only ready documents can be selected or have extracted evidence previewed.
   Selection survives refresh in the same tab and is rechecked for readiness; a new
   conversation clears it. Uploaded files remain on the server. Coverage is not accuracy.
-- Session info describes temporary memory; Setup info describes read-only server configuration. Long-term conversations,
-  cross-conversation history and personal API key controls are not implemented. Temporary multi-turn answers are supported as described below.
+- Session info describes temporary memory. Settings configures supported model providers, in-memory keys and retrieval parameters. Long-term conversations and cross-conversation history are not implemented. Temporary multi-turn answers are supported as described below.
 
 ## Original source previews
 
@@ -435,3 +434,14 @@ Open Settings to choose Gemini/Groq, set the model and Key, change PDF Top K (1�
 Apply saves instance-wide overrides in backend memory without contacting providers. Refresh preserves applied configuration; backend restart restores startup environment defaults. Blank Key fields keep the existing value. Clear credentials disables new tasks; Restore defaults may re-enable startup credentials. Already accepted questions and uploads retain their frozen configuration. Keys are never returned to the browser or persisted by Settings.
 
 Connection tests explicitly send fixed text to the selected provider and may incur charges. Apply a draft before testing it. A passing simple structured-output probe does not guarantee full question capability; service health alone does not validate a Key. This remains a local single-user application without multi-user authentication.
+
+
+### Verified configuration path and account limits
+
+1. Start the application with Docker as described above; open Settings.
+2. Select Gemini or Groq, enter a model supported by your account and its API Key. The tested models are `gemini-3.5-flash-lite` and `openai/gpt-oss-120b`, respectively. Groq models must support the strict JSON-schema mode used by this application; see [Groq structured-output support](https://console.groq.com/docs/structured-outputs). Arbitrary model names are not guaranteed to work.
+3. Enter a Voyage API Key with access to `voyage-4`, then Apply settings. Use Test inference & JSON and Test embedding for fixed-text checks; a simple probe does not verify the full question schema or your document-size allowance.
+4. Upload a small PDF, wait for Ready, select it, and ask a factual question. Expand its citation and Open original source to check the physical page and evidence region.
+5. If the provider rejects request size, lower PDF Top K in Settings and/or select fewer materials, then explicitly submit a new question. There is no automatic truncation, retry or paid-tier change. A smaller Top K may omit evidence required for broader questions.
+
+Live development acceptance used a six-page business-partner code of conduct. Gemini passed at Top K 8. This Groq account rejected the full request at Top K 8 (8,000 TPM allowance versus 9,097 requested), then passed at Top K 1. These are observed account-specific results, not universal limits or a guarantee that Top K 1 fits every document. Both answers were checked against the original page and highlighting. See [acceptance evidence](eval/results/m45_live_settings.json), including the original failure. Clean-runtime delivery reproduction remains an M5 check.

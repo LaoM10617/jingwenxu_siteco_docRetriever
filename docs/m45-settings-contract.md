@@ -1,12 +1,12 @@
 # M4.5.1 统一配置契约
 
 日期：2026-09-27；基准HEAD：2f3ad2de62d0be220d231cd7d800a02e4c1b0353，包含当前未提交M4.4工作。
-状态：用户已明确确认本具体契约（包括新HTTP接口与测试边界），作为M4.5.3实施依据；现已实现并完成受控验证，真实提供方复验待授权。M4.5.2限流建议与Embedding扩展取舍见m452-voyage-embedding-assessment.md，未自动改变本契约。
+状态：用户已明确确认本具体契约（包括新HTTP接口与测试边界），作为M4.5.3实施依据；现已实现并完成受控验证，真实提供方已在限定配置下验收，详见eval/results/m45_live_settings.json。M4.5.2限流建议与Embedding扩展取舍见m452-voyage-embedding-assessment.md，未自动改变本契约。
 
 ## 1. 范围与当前实现差异
 
 统一放在Settings。推理仅Gemini/Groq，允许模型名称与各自Key；无任意Base URL。检索Top K为最终PDF选取数1–20，默认8；重排默认沿启动配置（仓库默认false），词法/向量各20、RRF k60、28000字符证据预算固定。
-Embedding必做为Voyage模型/凭据状态/本地限流展示及Voyage Key覆盖。模型固定沿启动模型，本轮不能更换模型或维度；OpenAI-compatible Embedding和索引重建仍为M4.5.2条件评估，不在本文偷偷纳入。
+Embedding必做为Voyage模型/凭据状态/本地限流展示及Voyage Key覆盖。模型固定沿启动模型，本轮不能更换模型或维度；P-038已明确本阶段不扩展OpenAI-compatible Embedding或重建索引。
 
 实施前代码（历史差异）：main.py启动时创建Settings、模型、gateway、retriever与AnswerService；question_tasks.py使用同一answers对象，没有任务配置快照。embeddings.py有共享持久化预算（3RPM/10000TPM、最少20秒）与缓存，reranking.py独立单在途/完成后20秒冷却。Settings前端仍是说明页。须新增配置管理及任务绑定，不能仅添加表单或直接改共享对象。
 
@@ -91,4 +91,4 @@ PDF任务结果新增非秘密retrieval_diagnostics（旧任务可缺省）：�
 5. 检索：Top K 1/8/20、40候选上限、去重计数、预算遗漏、混合PDF/CSV分开计数、重排开关/故障回退、配置变化不能重置限流。
 6. 浏览器：Settings加载/草稿/测试/应用/清除/恢复、刷新状态、Key框清空、忙与错误提示、新旧轮配置显示；真实双提供方验收与受控测试分开报告。
 
-实施状态：接口、前端和任务配置冻结已完成，受控验证见eval/results/m45_settings.md。前端仅测试已应用配置，草稿须先应用；HTTP仍支持候选draft。P-038确认不扩展Embedding服务或重建索引。真实提供方验收待授权，正式evaluation/M5保留。
+实施状态：接口、前端和任务配置冻结已完成，受控验证见eval/results/m45_settings.md。前端仅测试已应用配置，草稿须先应用；HTTP仍支持候选draft。P-038确认不扩展Embedding服务或重建索引。真实提供方已完成限定配置验收：Gemini Top K8、Groq Top K1，Groq Top K8账户TPM失败保留。正式evaluation/M5保留。

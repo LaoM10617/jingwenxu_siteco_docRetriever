@@ -11,6 +11,8 @@ from pydantic import Field, SecretStr, StringConstraints, model_validator
 from app.questions import StrictModel
 from app.documents import DocumentError
 
+PROBE_TIMEOUT_SECONDS = 20
+
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 class Credential(StrictModel):
     action: Literal['keep','replace','clear','default']
@@ -171,9 +173,10 @@ def test_settings(body: Probe, request: Request):
     config=snapshot[0]
     if not manager.probe_lock.acquire(blocking=False):
         raise DocumentError('test_in_progress','Another connection test is running.',409)
-    start=time.monotonic(); budget=QuestionBudget(); budget.deadline=start+20
+    start=time.monotonic(); budget=QuestionBudget(); budget.deadline=start+PROBE_TIMEOUT_SECONDS
     result={'target':body.target,'tested_revision':snapshot[2],'tested_public_config':manager.public(snapshot)}
     done=Event()
+    admission_waiting, provider_started = Event(), Event()
     def work():
         code='passed'
         try:
@@ -192,11 +195,12 @@ def test_settings(body: Probe, request: Request):
                 tokens=counter(PREFIXES['query']+text)+16
                 sent=[False]
                 def call():
-                    budget.check(); sent[0]=True
+                    budget.check(); sent[0]=True; provider_started.set()
                     return VoyageProvider(key.get_secret_value(),timeout=min(20,budget.remaining())).embed(
                         [text],model=config.embedding_model,input_type='query',output_dimension=1024,
                         output_dtype='float',truncation=False)
                 try:
+                    admission_waiting.set()
                     response=request.app.state.bindings.scheduler.run(call,tokens,'query',budget,None)
                     EmbeddingGateway._vectors(response.vectors,1)
                 except EmbeddingError as exc:
@@ -220,6 +224,8 @@ def test_settings(body: Probe, request: Request):
     Thread(target=work,name='settings-probe',daemon=True).start()
     if not done.wait(max(0,budget.remaining())):
         # Do not release probe lock while an underlying request still runs.
-        result={**result,'status':'failed','code':'timeout','message':'Connection test timed out.',
+        code = 'local_rate_limited' if admission_waiting.is_set() and not provider_started.is_set() else 'timeout'
+        message = 'Local embedding admission exceeded the test deadline.' if code == 'local_rate_limited' else 'Connection test timed out.'
+        result={**result,'status':'failed','code':code,'message':message,
                 'elapsed_seconds':round(time.monotonic()-start,3)}
     return JSONResponse(result,headers={'Cache-Control':'no-store'})

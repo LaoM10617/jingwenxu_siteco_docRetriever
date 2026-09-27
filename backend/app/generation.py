@@ -107,6 +107,10 @@ class StructuredModel:
         except Exception as exc:
             budget.check()
             status = getattr(exc, 'status_code', None) or getattr(exc, 'code', None)
+            if status == 413:
+                raise DocumentError('generation_context_too_large',
+                    'The provider rejected the request size. Reduce PDF Top K or selected materials and check your model account limits.',
+                    413, False) from None
             if status in (401, 403):
                 code, retry = 'generation_authentication_failed', False
             elif status == 429:

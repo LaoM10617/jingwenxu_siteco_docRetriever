@@ -87,3 +87,21 @@ def test_transport_timeout_and_missing_key_are_explicit(tmp_path):
     with pytest.raises(DocumentError) as error:
         missing.generate('JSON', {}, ToolPlan.model_json_schema(), QuestionBudget())
     assert error.value.code == 'generation_not_configured'
+
+
+@pytest.mark.parametrize('provider', ['gemini', 'groq'])
+def test_provider_request_size_limit_is_actionable_without_retry(provider, tmp_path):
+    calls = []
+    def respond(request):
+        calls.append(True)
+        return httpx.Response(413, json={'error': {'code': 'rate_limit_exceeded',
+            'message': 'Request too large; private-account-id and secret-key'}})
+    model = StructuredModel(Settings(_env_file=None, data_dir=tmp_path,
+        generation_provider=provider, gemini_api_key='fake', groq_api_key='fake'),
+        transport=httpx.MockTransport(respond))
+    with pytest.raises(DocumentError) as error:
+        model.generate('JSON', {}, ToolPlan.model_json_schema(), QuestionBudget())
+    assert error.value.code == 'generation_context_too_large'
+    assert 'Top K' in str(error.value)
+    assert not error.value.retryable and len(calls) == 1
+    assert 'private-account-id' not in str(error.value) and 'secret-key' not in str(error.value)

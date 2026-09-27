@@ -562,3 +562,15 @@ M4.5.2只读核对完成，见docs/m452-voyage-embedding-assessment.md。建议�
 ## P-038：本机限流调整与Embedding范围收敛
 
 用户确认沿建议调整本机限流和Settings，不扩展Embedding服务或重建索引。具体参数为60 RPM/200000 TPM/最少1秒，重排成功后1秒；保守仓库默认与错误冷却保留。P-037契约继续适用，Settings已实施并受控验证，真实供应商复验待授权。证据见eval/results/m45_settings.md；不把账户截图当作当前Key实测。
+
+
+### P-038真实验收与账户边界
+
+2026-09-27：用户授权真实配置验收及追加2次Groq诊断/复验。Gemini+Voyage在Top K8、Groq+Voyage在Top K1完成同一开发PDF问答/原页核对。Groq原Top K8触发HTTP413（当前账户8000TPM，请求9097），保留失败；不自动降Top K、截断或切换付费。通过已有Settings由用户明确调整；HTTP413映射既有generation_context_too_large并提示操作。M4.5最低可用路径验收完成，可进入M4.6；不外推账户能力或通用质量，M5干净构建仍待做。
+
+
+## P-039：M4.6功能冻结与后续变更纪律
+
+2026-09-27，按用户要求执行M4.6。原case必做功能及P-031–038已选范围核对完成，双轴同一快照审查发现的一处Settings本地限流误报已修复复核，无未处理冻结阻断。完整范围、参数、依赖、实际证据与已知限制见docs/m46-feature-freeze.md；审查收据eval/results/m46_review.md。建立包含检查点的本地冻结提交，本轮不push。
+
+后续先M5.0固定题集/人工标准/调用授权后正式量化evaluation，再M5独立空runtime重建和演示。不得用开发题或M4.5不同Top K/缓存耗时替代公平评估。冻结后只做已记录的阻断修复，保留旧结果并重新冻结/复验受影响范围；不自动扩Embedding、OCR、任意模型端点或长期会话。此功能冻结不等于交付邮件后的最终代码冻结。

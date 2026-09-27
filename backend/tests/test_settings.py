@@ -147,3 +147,44 @@ def test_pdf_diagnostic_counts_and_selected_top_k(corpus,top_k):
     assert d['selected_count']==min(top_k,10) and d['requested_top_k']==top_k
 
 from test_reranking import corpus
+
+
+@pytest.mark.parametrize('local_wait', [True, False])
+def test_probe_deadline_distinguishes_local_admission_and_inflight_timeout(tmp_path, monkeypatch, local_wait):
+    from threading import Event
+    from app import runtime_settings
+    from app.embeddings import EmbeddingResponse
+    # Shorten only the test deadline; exercise real admission and HTTP lifecycle.
+    monkeypatch.setattr(runtime_settings, 'PROBE_TIMEOUT_SECONDS', .1, raising=False)
+    monkeypatch.setattr('app.voyage.load_token_counter', lambda path: lambda text: 2)
+    release, entered = Event(), Event()
+    calls = []
+    class Provider:
+        def __init__(self, key, **kwargs):
+            pass
+        def embed(self, texts, **kwargs):
+            calls.append(texts)
+            entered.set()
+            assert release.wait(3)
+            return EmbeddingResponse([[1.0] + [0.0] * 1023], 2)
+    monkeypatch.setattr('app.voyage.VoyageProvider', Provider)
+    app = create_app(Settings(_env_file=None, data_dir=tmp_path, voyage_api_key='fake-key'))
+    with TestClient(app) as client:
+        if local_wait:
+            app.state.bindings.scheduler.defer(60)
+        state = client.get('/api/settings').json()
+        body = {'expected_revision': state['revision'], 'target': 'embedding', 'explicit_probe': True}
+        try:
+            response = client.post('/api/settings/test', json=body)
+            assert response.status_code == 200
+            assert response.json()['code'] == ('local_rate_limited' if local_wait else 'timeout')
+            assert response.json()['elapsed_seconds'] < 1
+            if local_wait:
+                assert calls == []
+            else:
+                assert entered.is_set() and len(calls) == 1
+                # A timed-out caller does not free the still-running provider slot.
+                assert client.post('/api/settings/test', json=body).status_code == 409
+            assert client.get('/api/settings').json() == state
+        finally:
+            release.set()

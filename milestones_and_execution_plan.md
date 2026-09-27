@@ -1,4 +1,6 @@
-当前检查点：M4.5.1契约、M4.5.2取舍、M4.5.3实施及M4.5.4受控验证已完成；真实提供方验收待授权。详见P-038及eval/results/m45_settings.md。以下此前状态保留为阶段历史。
+当前冻结检查点：M4.6通过，双轴P2已修复复核；最终Windows/Linux各351＋10子测试、浏览器35通过/11跳过。版本及边界见docs/m46-feature-freeze.md。下一步M5.0，之后M5；下方阶段状态保留历史。
+
+当前检查点：M4.5.1契约、M4.5.2取舍、M4.5.3实施及M4.5.4受控验证已完成；真实提供方限定配置验收完成（Gemini Top K8、Groq Top K1；Groq Top K8账户TPM失败保留）。下一步M4.6冻结检查。详见P-038及eval/results/m45_live_settings.json。以下此前状态保留为阶段历史。
 
 # SITECO 文档问答挑战：Milestones 与落地步骤
 
