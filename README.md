@@ -4,6 +4,8 @@
 
 Upload documents, ask questions, and inspect the sources behind each answer.
 The demo combines a React chat interface with a FastAPI retrieval backend.
+The demo now supports pdf and csv files. 
+All evaluation data comes from https://www.siteco.de/metanavigation/downloads
 
 ## 2. Repository structure
 
