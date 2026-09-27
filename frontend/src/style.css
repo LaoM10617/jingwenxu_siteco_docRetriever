@@ -678,3 +678,27 @@ dialog::backdrop {
     margin-bottom: 20px;
   }
 }
+
+/* Source values stay adjacent to their labels without inferring document relationships. */
+.source-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin: 16px 0; }
+.source-fields div { min-width: 0; }
+.source-fields dt { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+.source-fields dd { margin: 0; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
+.question-progress { border-left: 2px solid var(--accent); padding: 0 14px; margin: 16px 0; }
+.question-progress p { margin: 6px 0; }
+@media (max-width: 520px) { .source-fields { grid-template-columns: 1fr; } }
+
+/* Original source inspection stays within the citation, with one image/overlay plane. */
+.source-preview { margin: 12px 0; min-width: 0; }
+.source-preview section { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 4px; }
+.preview-controls, .preview-legend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.preview-controls { margin: 12px 0; }
+.preview-controls button { min-height: 36px; }
+.preview-scroll { width: 100%; max-height: 70vh; overflow: auto; border: 1px solid var(--line); background: var(--surface); }
+.preview-scroll svg { display: block; max-width: none; height: auto; background: white; }
+.preview-scroll rect[data-role="evidence"] { fill: #d49b2226; stroke: #996b13; stroke-width: 1.5px; }
+.preview-scroll rect[data-role="context"] { fill: #155b911a; stroke: var(--accent); stroke-width: 1.5px; stroke-dasharray: 5 3; }
+.legend-evidence { border-bottom: 3px solid #996b13; }
+.legend-context { border-bottom: 3px dashed var(--accent); }
+.preview-record { border-left: 3px solid #996b13; padding: 12px; background: #fffaf0; }
+.preview-scroll:focus-visible { outline: 3px solid #6ba8d3; outline-offset: 2px; }

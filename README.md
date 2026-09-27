@@ -4,12 +4,36 @@ The current build provides a React/TypeScript document chat and a FastAPI backen
 
 See [development setup](docs/development.md) for Python 3.12 environment creation, pinned dependency installation, and verification commands. See [reuse notes](docs/reuse.md) for provenance and migration boundaries.
 
-M2.6 connects a shared quota/cache gateway, per-document FAISS IndexFlatIP,
-atomic PDF publication and scoped hybrid retrieval. See the
-[retrieval contract](docs/m26-retrieval-contract.md) and
-[Docker retrieval acceptance](eval/results/m26_hybrid.md). Retrieval is a backend
-method. M2.7 adds grounded answer/citation publication; M2.8 exposes asynchronous
-question tasks and browser chat. See the [task contract](docs/m28-chat-contract.md).
+## Implemented and verified scope
+
+The current implementation supports selected-document PDF/CSV questions, mixed
+scopes, asynchronous task polling, source expansion and temporary multi-turn
+conversation memory. PDF retrieval combines global lexical/vector candidate lists
+(20 each) with equal-weight RRF (k=60), returning up to 8 passages. CSV lookup
+uses exact, case-sensitive order numbers and retains duplicate source records.
+History helps resolve subjects; each answer retrieves fresh evidence from the
+currently selected materials. See the [retrieval contract](docs/m26-retrieval-contract.md),
+[question contract](docs/m28-chat-contract.md) and [memory contract](docs/m3-memory-contract.md).
+
+Recorded M3 verification includes Windows and Linux runs of 308 tests plus 10
+subtests each, and 28 browser checks passed with 6 historical opt-in checks skipped.
+These are historical results, not tests rerun by following this README. The real
+four-question sequence exposed an incorrect product assignment despite valid
+citations. After the fix, only two original follow-ups were rechecked successfully;
+the original sequence is not reported as all passing. See the
+[M3 checkpoint](eval/results/m3_checkpoint.md) and
+[integration evidence](eval/results/m35_integration.md) for outcomes and limits.
+
+M4 development validation and improvements are in progress. Local PDF original-page
+previews with evidence/context regions and CSV record previews are implemented and
+sampled against real citations; see the [M4.3 checkpoint](eval/results/m43_preview.md).
+User-facing provider configuration remains planned; reranking requires evidence and
+a separate decision. Formal numeric
+evaluation is required at M5.0 after feature freeze, with scoring details fixed
+before execution. Multi-model comparison is conditional. Feature freeze, formal
+evaluation and the M5 rebuild/delivery rehearsal are not complete. See
+[P-032](decisions.md#p-032m4开发验证与冻结后正式evaluation分离) and the
+[M4 handoff](docs/m4-handoff.md).
 
 ## Ask questions with Docker
 
@@ -42,11 +66,16 @@ partial results, clarification, exact misses and execution failures separately.
 Expand each citation to inspect original text and context. CSV record browsing
 does not regenerate the answer or imply it summarized all matching rows.
 
-Each question is independent. New conversation clears the current turns and scope;
-no previous-conversation history is sent to retrieval or generation. Per-tab temporary
-request metadata supports refresh without resubmitting. Server tasks expire after
-24 hours; unfinished tasks become interrupted on backend restart and are not retried
-automatically. This is a single-user local demo, not an authenticated multi-user service.
+Follow-ups use temporary memory within the same conversation (up to 6 whole
+turns / 12,000 serialized characters). New conversation clears the current turns
+and selected scope. Per-tab request metadata supports refresh with GET polling,
+without automatically submitting questions again. Completed turns remain available
+until 24 hours after the first question; follow-ups do not extend retention.
+Unfinished tasks become interrupted on backend restart and are not retried
+automatically. Material selection is restored within the same tab and conversation,
+then checked against the loaded ready documents. Unavailable selections are removed
+with a notice; review Materials before asking. Existing tasks retain their submitted
+scope. This is a single-user local demo, not an authenticated multi-user service.
 
 Voyage ingestion/query share 3RPM/10KTPM. Waiting can dominate latency. Question
 deadline is 240 seconds including queueing, with at most 60 seconds per generation
@@ -61,7 +90,7 @@ list; upload a PDF, ask and check its source, then start a new conversation and 
 with a price-list CSV. Do not copy an existing database, vectors, embedding cache or
 answers. A successful pair is only a basic smoke check, not the M3 acceptance matrix.
 
-## Planned directory structure
+## Repository layout
 
 Empty directories are not tracked by Git. Requirements, private materials, runtime data, and temporary files below are local-only.
 
@@ -122,18 +151,20 @@ setup for configuration precedence, startup failures and current validation.
 
 ## Docker startup
 
-Run from the repository root with Docker Desktop using Linux containers. No host
-Python, Node.js or model keys are needed for startup or CSV processing. PDF
-indexing requires the configuration below. Stop any local server using ports 8000 or 8080 first.
+Use the startup sequence in **Ask questions with Docker** above, including the
+one-off tokenizer preparation for PDF indexing. Startup, health checks and CSV
+processing do not require provider keys; answering questions requires generation
+credentials, and PDF indexing/retrieval also requires Voyage credentials.
+
+Optional verification and lifecycle commands (use your configured ports):
 
 ```powershell
 docker build --target test -t siteco-backend:test -f backend/Dockerfile .
-docker compose up --build --wait --wait-timeout 45
 docker compose ps
-Invoke-RestMethod http://127.0.0.1:8000/api/health
+Invoke-RestMethod http://127.0.0.1:8000/api/health # Replace 8000 with your configured HOST_PORT
+docker compose logs frontend backend
 docker compose stop
-docker compose start --wait --wait-timeout 45
-Invoke-RestMethod http://127.0.0.1:8000/api/health
+docker compose start --wait --wait-timeout 60
 docker compose down
 ```
 
@@ -144,7 +175,7 @@ test-target build above runs the Linux tests; Compose
 builds the runtime target without test dependencies. Initial builds need internet
 to download the base image and packages; health/startup do not call models.
 
-Compose binds `./data/runtime` to `/app/runtime`; `down` removes the container
+By default, Compose binds `./data/runtime` to `/app/runtime`; `down` removes the container
 and network while leaving that host directory intact. A later `up --wait`
 reuses it. The frontend serves static assets and proxies `/api` to the backend;
 it receives no provider keys or runtime-data mount. Set `FRONTEND_PORT` to
@@ -163,12 +194,16 @@ output when using real credentials; `docker compose config --quiet` validates
 without displaying values. Changing runtime variables requires `up -d` to
 recreate the container, not just `restart`.
 
-M2.4 validates the upload/status workspace and two-container proxy. M2.5 adds
-real CSV upload-to-ready, evidence pagination, exact order lookup and restoration
-after container recreation. M2.6 adds PDF ready publication and backend hybrid
-retrieval. Current question tasks and chat are described above.
-See [CSV contract](docs/m25-csv-contract.md) and [acceptance](eval/results/m25_csv.md).
-See [development notes](docs/development.md) for acceptance evidence and limits.
+Backend configuration defaults are `GENERATION_PROVIDER=gemini`,
+`GEMINI_GENERATION_MODEL=gemini-3.5-flash-lite`,
+`GROQ_GENERATION_MODEL=openai/gpt-oss-120b`, `EMBEDDING_PROVIDER=voyage`,
+and `EMBEDDING_MODEL=voyage-4`. Gemini uses `GEMINI_API_KEY`; explicitly selecting
+Groq uses `GROQ_API_KEY`. Generation model names are configurable, but this does
+not establish compatibility or quality for every model. The recorded real M3
+checks used Gemini, not a multi-provider comparison. PDF indexing supports the
+pinned Voyage model/tokenizer; arbitrary embedding models, base URLs and
+in-browser key management are not supported. See [.env.example](.env.example)
+and [development notes](docs/development.md).
 
 ### Enable PDF indexing
 
@@ -205,11 +240,28 @@ during ingestion; no paid-plan switch is automatic.
   automatically repeat an upload after a network interruption: refresh the
   material list first, because the server may already have received it.
 - Open Materials for states, extraction coverage, warnings and eligible retries.
-  Only ready documents can be selected or previewed. The selection lasts for the
-  current page; uploaded files remain on the server. Coverage is not accuracy.
-- History and Settings explain their current limitations. Persistent conversations,
-  personal API key controls, multi-turn answers and original-page highlighting
-  are not implemented in this build.
+  Only ready documents can be selected or have extracted evidence previewed.
+  Selection survives refresh in the same tab and is rechecked for readiness; a new
+  conversation clears it. Uploaded files remain on the server. Coverage is not accuracy.
+- Session info describes temporary memory; Setup info describes read-only server configuration. Long-term conversations,
+  cross-conversation history and personal API key controls are not implemented. Temporary multi-turn answers are supported as described below.
+
+## Original source previews
+
+Expand an answer citation and choose **Open original source**. PDF previews display
+its original physical page, with solid amber evidence regions and dashed blue
+context/headings. Zoom and Fit page move the image and overlays together. This is
+source-region highlighting, not word-by-word semantic verification. CSV previews
+show the cited logical record and every original field, including empty values;
+current citations do not identify which individual fields support a sentence.
+
+Previews resolve the document/evidence IDs again each time they are opened. Unknown
+or unavailable sources show an error while the saved citation text remains readable.
+Missing/unreliable coordinates show the page with a positioning notice and no boxes.
+PDF images are rendered locally at up to 144 dpi, capped at 1,600 pixels on the long
+edge; zoom does not create additional detail. Rendering uses the existing locked
+PDF dependencies, with no model calls or external viewer. Original file downloads
+and arbitrary filesystem paths are not exposed. See the [preview contract](docs/m43-preview-contract.md).
 
 ## Frontend development and browser checks
 
@@ -249,7 +301,7 @@ limit; structural errors fail the whole file. Errors include 413 (size),
 415 (type), 409 (capacity), 422 (empty/malformed request), and sanitized 503
 (storage unavailable), with `error.code/message/retryable`.
 
-This intermediate build accepts uploads as queued, then its single background
+The backend accepts uploads as queued, then its single background
 worker parses PDFs and persists evidence, page coverage and warnings. With PDF
 configuration present it embeds the evidence and publishes vectors, source
 mapping and FTS together before ready. CSV becomes ready only after all records and the
@@ -269,7 +321,7 @@ Shutdown requests cooperative cancellation and waits up to two seconds; late
 results cannot publish. Provider calls use finite timeouts and honor
 cancellation. This is not a durable task queue or an exactly-once guarantee.
 
-## Document status and evidence (M2.2 accepted)
+## Document status and evidence
 
 - `GET /api/documents`: array of documents, ordered by creation time and ID.
 - `GET /api/documents/{id}`: current status, stage and structured error.
@@ -298,7 +350,7 @@ normalized price is a decimal string; missing/invalid prices are null.
 the deterministic backend entry: explicit ready CSV scope, exact case-sensitive
 keys, all duplicate sources, full counts and pagination. The production question
 task API calls this method through validated planning; completed tasks expose
-CSV pagination through their frozen scope (see the question API above).
+CSV pagination through their frozen scope (see the [question API contract](docs/m28-chat-contract.md)).
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/documents
@@ -324,6 +376,9 @@ GET polling and does not automatically POST questions again.
 
 The backend resolves subjects from at most 6 recent whole turns (12,000 serialized
 characters total), then retrieves evidence only from the current selected documents.
+Previously validated subjects are retained as identity clues within that same budget.
+For a previously resolved turn, a phrase found only in its original question cannot
+authorize another lookup; references must match a retained subject or source text.
 History is not evidence for the new answer. Missing or ambiguous references require
 clarification. The extra structured model call shares the original 240-second budget.
 Model reference selection can still be wrong; inspect the displayed resolved subjects
@@ -335,3 +390,19 @@ an explicit new conversation. Completed history survives backend restarts during
 retention; unfinished tasks remain interrupted and are never automatically replayed.
 There is no cross-conversation memory, long-term history, or authentication.
 See [the memory contract](docs/m3-memory-contract.md) for bounds and verification.
+
+## Current limitations
+
+PDF support covers text-based documents up to 50 pages; extraction warnings and
+missing layout relationships can limit answers. OCR, visual/checkmark interpretation
+and semantic verification of generated prose are absent.
+CSV support is limited to the documented price-list schema, not arbitrary spreadsheets.
+A provider failure in a required route fails the question; it is not silently
+presented as an incomplete successful answer. Questions use one worker with up to
+8 waiting tasks and 1,000 retained task records; the browser permits up to 50 turns
+per conversation. There is no streaming, cancellation API, durable job queue,
+authentication or long-term/cross-conversation memory. Small real checks do not
+establish a general accuracy rate or stable latency percentile.
+
+M4.2 targeted repairs and verification are recorded in [the development checkpoint](eval/results/m42_experience.md).
+These sampled checks are not a formal benchmark or a general reliability estimate.

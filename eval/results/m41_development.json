@@ -1,0 +1,290 @@
+{
+  "kind": "development_not_benchmark",
+  "cases": [
+    {
+      "case": "M41-01",
+      "elapsed_seconds": 3.203,
+      "outcome": "partial",
+      "generation_seconds": 1.712,
+      "generation_calls": 1,
+      "embedding_calls": 1,
+      "embedding_seconds": 0.47,
+      "observed_stages": [
+        {
+          "stage": "queued",
+          "observed_seconds": 0.109
+        },
+        {
+          "stage": "generating",
+          "observed_seconds": 1.141
+        },
+        {
+          "stage": "completed",
+          "observed_seconds": 3.203
+        }
+      ],
+      "citation_scope_valid": true,
+      "manual_verdict": "supported_for_this_case",
+      "primary_development_case": true
+    },
+    {
+      "case": "M41-02",
+      "elapsed_seconds": 3.172,
+      "outcome": "answered",
+      "generation_seconds": 2.228,
+      "generation_calls": 2,
+      "embedding_calls": 0,
+      "embedding_seconds": 0,
+      "observed_stages": [
+        {
+          "stage": "queued",
+          "observed_seconds": 0.078
+        },
+        {
+          "stage": "planning",
+          "observed_seconds": 1.125
+        },
+        {
+          "stage": "generating",
+          "observed_seconds": 2.141
+        },
+        {
+          "stage": "completed",
+          "observed_seconds": 3.172
+        }
+      ],
+      "citation_scope_valid": true,
+      "manual_verdict": "supported_for_this_case",
+      "primary_development_case": true
+    },
+    {
+      "case": "M41-03",
+      "elapsed_seconds": 4.234,
+      "outcome": "answered",
+      "generation_seconds": 3.059,
+      "generation_calls": 3,
+      "embedding_calls": 0,
+      "embedding_seconds": 0,
+      "observed_stages": [
+        {
+          "stage": "queued",
+          "observed_seconds": 0.109
+        },
+        {
+          "stage": "resolving_references",
+          "observed_seconds": 1.156
+        },
+        {
+          "stage": "planning",
+          "observed_seconds": 2.171
+        },
+        {
+          "stage": "generating",
+          "observed_seconds": 3.187
+        },
+        {
+          "stage": "completed",
+          "observed_seconds": 4.234
+        }
+      ],
+      "citation_scope_valid": true,
+      "manual_verdict": "supported_for_this_case",
+      "primary_development_case": true
+    },
+    {
+      "case": "M41-04",
+      "elapsed_seconds": 3.156,
+      "outcome": "answered",
+      "generation_seconds": 1.845,
+      "generation_calls": 1,
+      "embedding_calls": 1,
+      "embedding_seconds": 0.272,
+      "observed_stages": [
+        {
+          "stage": "queued",
+          "observed_seconds": 0.063
+        },
+        {
+          "stage": "generating",
+          "observed_seconds": 1.094
+        },
+        {
+          "stage": "completed",
+          "observed_seconds": 3.156
+        }
+      ],
+      "citation_scope_valid": true,
+      "manual_verdict": "supported_for_this_case",
+      "primary_development_case": true
+    },
+    {
+      "case": "M41-05",
+      "elapsed_seconds": 3.172,
+      "outcome": "answered",
+      "generation_seconds": 2.266,
+      "generation_calls": 2,
+      "embedding_calls": 1,
+      "embedding_seconds": 0.252,
+      "observed_stages": [
+        {
+          "stage": "queued",
+          "observed_seconds": 0.079
+        },
+        {
+          "stage": "resolving_references",
+          "observed_seconds": 1.11
+        },
+        {
+          "stage": "generating",
+          "observed_seconds": 2.157
+        },
+        {
+          "stage": "completed",
+          "observed_seconds": 3.172
+        }
+      ],
+      "citation_scope_valid": true,
+      "manual_verdict": "supported_for_this_case",
+      "primary_development_case": true
+    },
+    {
+      "case": "M41-06",
+      "elapsed_seconds": 3.188,
+      "outcome": "exact_not_found",
+      "generation_seconds": 2.45,
+      "generation_calls": 2,
+      "embedding_calls": 0,
+      "embedding_seconds": 0,
+      "observed_stages": [
+        {
+          "stage": "queued",
+          "observed_seconds": 0.079
+        },
+        {
+          "stage": "planning",
+          "observed_seconds": 1.125
+        },
+        {
+          "stage": "completed",
+          "observed_seconds": 3.188
+        }
+      ],
+      "citation_scope_valid": true,
+      "manual_verdict": "fail_subject_identity",
+      "primary_development_case": true
+    },
+    {
+      "case": "M41-07",
+      "elapsed_seconds": 4.219,
+      "outcome": "partial",
+      "generation_seconds": 2.892,
+      "generation_calls": 2,
+      "embedding_calls": 1,
+      "embedding_seconds": 0.265,
+      "observed_stages": [
+        {
+          "stage": "queued",
+          "observed_seconds": 0.094
+        },
+        {
+          "stage": "planning",
+          "observed_seconds": 1.125
+        },
+        {
+          "stage": "generating",
+          "observed_seconds": 2.156
+        },
+        {
+          "stage": "completed",
+          "observed_seconds": 4.219
+        }
+      ],
+      "citation_scope_valid": true,
+      "manual_verdict": "supported_for_this_case",
+      "primary_development_case": true
+    },
+    {
+      "case": "M41-08",
+      "elapsed_seconds": 3.203,
+      "outcome": "answered",
+      "generation_seconds": 1.506,
+      "generation_calls": 1,
+      "embedding_calls": 1,
+      "embedding_seconds": 0.253,
+      "observed_stages": [
+        {
+          "stage": "queued",
+          "observed_seconds": 0.125
+        },
+        {
+          "stage": "generating",
+          "observed_seconds": 1.156
+        },
+        {
+          "stage": "completed",
+          "observed_seconds": 3.203
+        }
+      ],
+      "citation_scope_valid": true,
+      "manual_verdict": "supported_for_this_case",
+      "primary_development_case": true
+    },
+    {
+      "case": "M41-09-cache",
+      "elapsed_seconds": 2.219,
+      "outcome": "partial",
+      "generation_seconds": 1.549,
+      "generation_calls": 1,
+      "embedding_calls": 0,
+      "embedding_seconds": 0,
+      "observed_stages": [
+        {
+          "stage": "queued",
+          "observed_seconds": 0.094
+        },
+        {
+          "stage": "generating",
+          "observed_seconds": 1.141
+        },
+        {
+          "stage": "completed",
+          "observed_seconds": 2.219
+        }
+      ],
+      "citation_scope_valid": true,
+      "manual_verdict": "supported_for_this_case",
+      "primary_development_case": false
+    }
+  ],
+  "median_first_eight_seconds": 3.1955,
+  "timing_limit": "Client elapsed includes up to about one second terminal polling delay. Provider durations from logs; residual is not exact queue/retrieval time. Log attribution assumes this serial run has no competing model requests.",
+  "sampling_limit": "Linked conversation turns are not statistically independent. Cache repeat is additional, not a primary case.",
+  "case_sha256": "4189d63275c1afbd53dae93a6731458e1422471e35d8137c3567f3b8568984b1",
+  "head": "de8487dd25ce5f21127d59395e965686f0005a42",
+  "provider": "gemini",
+  "model": "gemini-3.5-flash-lite",
+  "embedding_model": "voyage-4",
+  "case_definition": "../cases/m41_development.json",
+  "raw_local_results": "tmp/m41-live-20260927",
+  "findings": [
+    {
+      "id": "F1",
+      "priority": "M4.2 first",
+      "case": "M41-06",
+      "expected_subject": "0MD5307L0940",
+      "resolved_subject": "the second luminaire",
+      "actual_csv_order_ids": [
+        "the second luminaire"
+      ],
+      "category": "reference resolution / planning semantic error",
+      "status": "unfixed"
+    },
+    {
+      "id": "F2",
+      "priority": "M4.2 next",
+      "category": "interaction",
+      "observation": "3 turns restored after refresh; material selection 1 -> 0; zero API writes",
+      "status": "unfixed"
+    }
+  ]
+}

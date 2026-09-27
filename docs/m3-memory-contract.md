@@ -30,15 +30,20 @@ recovery remains valid. No running database is read by an external process.
 Follow parent links, most recent first, taking at most 6 whole turns and a total of
 12000 characters measured as the sum of their JSON serializations (ensure_ascii=False).
 A turn contains its ID, original question, published answer segment texts, gaps and
-published citation source texts. Stop at the first turn that would exceed the budget;
+published citation source texts and previously validated resolved_subjects (identity
+clues, not facts), all counted within the same budget. Stop at the first turn that would exceed the budget;
 never cut away qualifiers or skip a nearer turn to include an older one. Send the
 selected turns chronologically. If none fit, return a clarification without a model call.
 
 One structured model call (stage resolving_references) selects references as
 {question_id, term}, at most 10 terms of 200 characters, or requests clarification.
 History is untrusted input. A self-contained question may use no reference terms.
-Every term must match a complete literal item in that historical question or published
-source text, using the same word/model punctuation boundaries as exact order checks.
+For a turn without prior resolved subjects, every term must match a complete literal
+item in its question or published source text, using the existing word/model boundaries.
+For a previously resolved turn, accept an exact retained subject or a complete literal
+source item; question-only phrases such as "the second luminaire" require clarification.
+Source topics remain eligible. This conservative guard may clarify a reference that
+exists only in the original question; it does not automatically select a sole subject.
 Historical answer prose alone cannot authorize a new exact lookup identifier.
 Unknown IDs, invented terms, substrings or declared ambiguity lead to clarification.
 Malformed output and provider failures remain task failures, not insufficient evidence.
@@ -62,7 +67,10 @@ correctly, or that arbitrary generated prose is semantically correct.
 ## Browser and verification
 
 The browser attaches the latest completed question, not a running/failed one. It saves
-only per-tab request metadata, parent links and expiry. Refresh reloads task results by
+per-tab request metadata, parent links, expiry and local submission time. Material
+selection is separately stored for the same conversation, revalidated against ready
+documents after loading, and cleared on a new conversation. Invalid selections show
+a notice. Existing submitted scopes remain immutable. Refresh reloads task results by
 GET; an ambiguous POST requires explicit retry with the identical body and request ID.
 Unresolved submissions block sending a new follow-up until recovered or a new
 conversation is started. At expiry, sending is disabled and an explicit notice appears.
@@ -76,3 +84,6 @@ resolution and legacy storage migration. Browser tests cover refresh, changed sc
 expiry and ambiguous follow-up recovery. M3.5 sampled real D01/D06/D09 combinations and retained an ordinal-generation failure
 and its bounded repair/revalidation; see eval/results/m35_integration.md. This is not
 a general reliability estimate. No held-out question was used for tuning.
+
+M4.2 regression and sampled real verification: [checkpoint](../eval/results/m42_experience.md).
+No public request/result schema was added for these repairs.

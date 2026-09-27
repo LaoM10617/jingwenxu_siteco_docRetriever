@@ -121,7 +121,8 @@ class QuestionTasks:
             request, answer = json.loads(row['request']), json.loads(row['answer'])
             turn = {'question_id': identity, 'question': request['question'],
                     'segments': [s['text'] for s in answer['segments']], 'gaps': answer['gaps'],
-                    'sources': [s['text'] for s in answer['citations']]}
+                    'sources': [s['text'] for s in answer['citations']],
+                    'resolved_subjects': [r['term'] for r in (answer.get('memory') or {}).get('references', [])]}
             size = len(json.dumps(turn, ensure_ascii=False))
             if used + size > 12000:
                 break

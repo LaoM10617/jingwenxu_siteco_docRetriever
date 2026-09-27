@@ -106,3 +106,9 @@ def document_evidence(document_id: str, request: Request,
     evidence = request.app.state.documents.read_evidence(document_id, offset, limit)
     return [{key: item[key] for key in ('evidence_id', 'text', 'locator', 'raw_values', 'headers', 'price', 'price_status') if key in item}
             for item in evidence]
+
+
+@router.get('/api/documents/{document_id}/evidence/{evidence_id}/preview')
+def source_preview(document_id: str, evidence_id: str, request: Request):
+    return JSONResponse(request.app.state.documents.preview(document_id, evidence_id),
+                        headers={'Cache-Control': 'no-store'})

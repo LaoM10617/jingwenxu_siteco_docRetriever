@@ -362,6 +362,20 @@ class DocumentService:
             return json.loads(json.dumps({**row, 'document_id': document_id,
                                           'original_filename': document['original_filename']}))
 
+    def preview(self, document_id, evidence_id):
+        source = self.read_evidence_id(document_id, evidence_id)
+        if source['locator']['kind'] == 'csv':
+            return {'kind': 'csv', 'record_number': source['locator']['record_number'],
+                    'headers': source['headers'], 'raw_values': source['raw_values']}
+        from app.previews import render_pdf
+        document = self.get(document_id)
+        path = (self.uploads / document['stored_name']).resolve()
+        if path.parent != self.uploads.resolve() or not path.is_file():
+            raise DocumentError('original_unavailable', 'The original file is unavailable. The source text remains available.', 404)
+        if sha256(path.read_bytes()).hexdigest() != document['content_hash']:
+            raise DocumentError('original_changed', 'The original file no longer matches this source.', 409)
+        return render_pdf(path, source)
+
     def pdf_snapshot(self, document_ids):
         with self._lock:
             result = {}

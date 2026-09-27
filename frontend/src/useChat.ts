@@ -14,10 +14,10 @@ export type Answer = {
 };
 type Submission = {conversation_id: string; request_id: string; question: string; document_ids: string[]; previous_question_id?: string};
 export type Task = Submission & {question_id: string; status: string; stage: string;
-  conversation_expires_at?: number;
+  conversation_expires_at?: number; created_at?: number;
   answer: Answer | null; error: {code: string; message: string} | null};
 export type Turn = {body: Submission; question_id?: string; task?: Task; error?: string;
-  unavailable?: boolean; names: string[]};
+  unavailable?: boolean; names: string[]; submittedAt?: number};
 type Chat = {conversation: string; created: number; expires?: number; turns: Turn[]};
 const key = 'siteco-current-chat';
 const fresh = (): Chat => ({conversation: crypto.randomUUID(), created: Date.now(), turns: []});
@@ -54,8 +54,8 @@ export function useChat() {
   const [pollAgain, setPollAgain] = useState(0);
   useEffect(() => {
     try {
-      sessionStorage.setItem(key, JSON.stringify({...chat, turns: chat.turns.map(({body, question_id, names}) =>
-        ({body, question_id, names}))}));
+      sessionStorage.setItem(key, JSON.stringify({...chat, turns: chat.turns.map(({body, question_id, names, submittedAt}) =>
+        ({body, question_id, names, submittedAt}))}));
     } catch { /* The current page still works without persistence. */ }
   }, [chat]);
   const pending = (expired ? [] : chat.turns).filter(t => t.question_id && !finished(t.task) && !t.unavailable);
@@ -104,7 +104,7 @@ export function useChat() {
     if (busy || submitting.current.size || !message.trim() || !document_ids.length || chat.turns.length >= 50) return;
     if (Date.now() >= expires) { setNow(Date.now()); return; }
     const parent = [...chat.turns].reverse().find(t => t.task?.status === 'completed');
-    const turn: Turn = {body: {conversation_id: chat.conversation, request_id: crypto.randomUUID(),
+    const turn: Turn = {submittedAt: Date.now(), body: {conversation_id: chat.conversation, request_id: crypto.randomUUID(),
       question: message.trim(), document_ids: [...document_ids],
       ...(parent?.question_id ? {previous_question_id: parent.question_id} : {})}, names: [...names]};
     setChat(c => ({...c, turns: [...c.turns, turn]}));

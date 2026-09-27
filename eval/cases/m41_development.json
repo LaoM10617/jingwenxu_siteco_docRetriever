@@ -1,0 +1,136 @@
+{
+  "kind": "development_not_benchmark",
+  "cases": [
+    {
+      "id": "M41-01",
+      "question": "Welche Incoterms-Fassung ist laut Einkaufsbedingungen maßgeblich?",
+      "documents": [
+        "terms"
+      ],
+      "expected": [
+        "Incoterms 2020"
+      ],
+      "evidence": [
+        "terms physical page 1, Article II.3"
+      ]
+    },
+    {
+      "id": "M41-02",
+      "question": "Welchen Listenpreis und welches Gültigkeitsdatum hat 51DB11EC11B1D?",
+      "documents": [
+        "prices"
+      ],
+      "expected": [
+        "51DB11EC11B1D: 183,20; 01.06.2026",
+        "No invented currency, tax or discount"
+      ],
+      "evidence": [
+        "prices logical record 1"
+      ]
+    },
+    {
+      "id": "M41-03",
+      "parent": "M41-02",
+      "question": "Ab welchem Datum gilt dieser Preis?",
+      "documents": [
+        "prices"
+      ],
+      "expected": [
+        "Resolve 51DB11EC11B1D; 01.06.2026 from current CSV evidence"
+      ],
+      "evidence": [
+        "prices logical record 1"
+      ]
+    },
+    {
+      "id": "M41-04",
+      "question": "Compare Rondel order numbers 0MD5307L1830 and 0MD5307L0940.",
+      "documents": [
+        "rondel"
+      ],
+      "expected": [
+        "0MD5307L1830: 3000 K, 1800 lm, 18 W, ON/OFF, 1.6 kg",
+        "0MD5307L0940: 4000 K, 900 lm, 9 W, ON/OFF, 1.6 kg"
+      ],
+      "evidence": [
+        "rondel physical page 2, order variants rows 2 and 5"
+      ]
+    },
+    {
+      "id": "M41-05",
+      "parent": "M41-04",
+      "question": "What are the colour temperature and power of the second luminaire?",
+      "documents": [
+        "rondel"
+      ],
+      "expected": [
+        "Resolve 0MD5307L0940; 4000 K and 9 W",
+        "Do not recount retrieved table rows"
+      ],
+      "evidence": [
+        "rondel physical page 2, order variants row 5"
+      ]
+    },
+    {
+      "id": "M41-06",
+      "parent": "M41-05",
+      "question": "What is its power? Use only the currently selected price list; if it does not provide this, say so.",
+      "documents": [
+        "prices"
+      ],
+      "expected": [
+        "Resolve 0MD5307L0940; no supported power answer from current CSV",
+        "No PDF/history evidence reuse; explicit absence or insufficient evidence"
+      ],
+      "evidence": [
+        "prices exact lookup of 0MD5307L0940; verify locally before execution"
+      ]
+    },
+    {
+      "id": "M41-07",
+      "question": "Welche Incoterms-Fassung ist maßgeblich, und welchen Listenpreis hat 51DB11EC11B1D-NOT-FOUND? Bitte getrennt beantworten.",
+      "documents": [
+        "terms",
+        "prices"
+      ],
+      "expected": [
+        "Incoterms 2020 supported on terms page 1",
+        "Exact CSV miss for 51DB11EC11B1D-NOT-FOUND; do not substitute price 183,20",
+        "Partial answer with explicit gap"
+      ],
+      "evidence": [
+        "terms physical page 1, Article II.3",
+        "prices exact absence for synthetic identifier"
+      ]
+    },
+    {
+      "id": "M41-08",
+      "question": "Gelten die Allgemeinen Geschäftsbedingungen des Auftragnehmers automatisch? Unter welcher Voraussetzung gelten sie laut Einkaufsbedingungen?",
+      "documents": [
+        "terms"
+      ],
+      "expected": [
+        "No automatic applicability",
+        "Only insofar as the purchaser expressly agreed in writing; retain scope and condition"
+      ],
+      "evidence": [
+        "terms physical page 1, Article II.1"
+      ]
+    },
+    {
+      "id": "M41-09-cache",
+      "repeat_of": "M41-01",
+      "question": "Welche Incoterms-Fassung ist laut Einkaufsbedingungen maßgeblich?",
+      "documents": [
+        "terms"
+      ],
+      "expected": [
+        "Incoterms 2020; same scope, new conversation",
+        "Extra cache observation, not an independent case"
+      ],
+      "evidence": [
+        "terms physical page 1, Article II.3"
+      ]
+    }
+  ]
+}

@@ -49,7 +49,16 @@ export default function App() {
   const [listError, setListError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [refresh, setRefresh] = useState(0);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('siteco-material-scope') || 'null');
+      if (saved?.conversation === chat.chat.conversation && Array.isArray(saved.ids)
+          && saved.ids.length <= 10 && saved.ids.every((id: unknown) => typeof id === 'string'))
+        return [...new Set<string>(saved.ids)];
+    } catch { /* Storage is optional; the current page remains usable. */ }
+    return [];
+  });
+  const [scopeNotice, setScopeNotice] = useState('');
   const [sidebar, setSidebar] = useState(false);
   const [narrow, setNarrow] = useState(
     () => window.matchMedia("(max-width: 900px)").matches,
@@ -82,11 +91,6 @@ export default function App() {
         setDocuments(result);
         setListError("");
         setLoaded(true);
-        setSelected((ids) =>
-          ids.filter((id) =>
-            result.some((d) => d.document_id === id && d.status === "ready"),
-          ),
-        );
         if (
           result.some((d) => d.status === "queued" || d.status === "processing")
         )
@@ -106,6 +110,21 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('siteco-material-scope', JSON.stringify({conversation: chat.chat.conversation, ids: selected}));
+    } catch { /* Storage is optional. */ }
+  }, [selected, chat.chat.conversation]);
+
+  useEffect(() => {
+    if (!loaded || listError) return;
+    const ready = selected.filter(id => documents.some(d => d.document_id === id && d.status === 'ready'));
+    if (ready.length !== selected.length) {
+      setScopeNotice(`${selected.length - ready.length} selected material(s) are no longer ready or available. Review Materials before asking.`);
+      setSelected(ready);
+    }
+  }, [documents, loaded, listError, selected]);
 
   useEffect(() => {
     const reload = () => setRefresh((n) => n + 1);
@@ -305,7 +324,7 @@ export default function App() {
               aria-current={tab === value ? "page" : undefined}
               onClick={() => setTab(value)}
             >
-              {value[0].toUpperCase() + value.slice(1)}
+              {{materials: 'Materials', history: 'Session info', settings: 'Setup info'}[value]}
             </button>
           ))}
         </nav>
@@ -476,13 +495,13 @@ export default function App() {
               PDF / CSV · 20 MiB each
               <br />
               Up to 10 active materials. Files persist after refresh; selection
-              is for this page only.
+              is restored in this tab and checked for availability.
             </p>
           </>
         )}
         {tab === "history" && (
           <section>
-            <h2>Conversation history</h2>
+            <h2>Current session</h2>
             <p className="muted">
               This tab keeps the current conversation temporarily so you can refresh and resume a question.
             </p>
@@ -493,13 +512,13 @@ export default function App() {
         )}
         {tab === "settings" && (
           <section>
-            <h2>Settings</h2>
+            <h2>Provider setup (read-only)</h2>
             <p className="muted">
               Provider configuration is managed by the server in this build.
               Personal API key settings are not available yet.
             </p>
             <p className="muted">
-              Your browser does not receive server credentials.
+              Your browser does not receive server credentials. A healthy server does not prove that a provider key or quota is ready. Before a demo, verify the server configuration and run a small authorized question.
             </p>
           </section>
         )}
@@ -508,7 +527,7 @@ export default function App() {
       <main inert={sidebar && narrow}>
         <div className="conversation-heading">
           <span>Document conversation</span>
-          <button onClick={() => {chat.newConversation(); setSelected([]); setPreview(null);}}>New conversation</button>
+          <button onClick={() => {chat.newConversation(); setSelected([]); setScopeNotice(''); setPreview(null);}}>New conversation</button>
         </div>
         {currentPreview ? (
           <EvidencePanel
@@ -540,6 +559,7 @@ export default function App() {
           </section>
         )}
         <div className="composer-area">
+          {scopeNotice && <p role="status" className="notice">{scopeNotice}</p>}
           <div className="scope-line">
             <button onClick={showMaterials}>
               {selected.length} materials selected
@@ -592,7 +612,7 @@ export default function App() {
               </details>
               <button
                 className="send-button"
-                disabled={chat.busy || !chat.message.trim() || !selected.length || !!listError || chat.chat.turns.length >= 50}
+                disabled={!loaded || selected.some(id => !documents.some(d => d.document_id === id && d.status === "ready")) || chat.busy || !chat.message.trim() || !selected.length || !!listError || chat.chat.turns.length >= 50}
                 onClick={() => {setPreview(null); chat.send(selected, selected.map(id => documents.find(d => d.document_id === id)?.original_filename || id));}}
                 aria-label="Send message"
               >

@@ -276,3 +276,51 @@ def test_resolved_subject_is_explicit_at_planning_and_answer_provider_boundaries
         assert answer['bundle'].get('resolved_subjects')==['001']
         assert 'history' not in answer['bundle']
         assert second['answer']['memory']['references'][0]['term']=='001'
+
+
+@pytest.mark.parametrize('resolution', ['unresolved', 'canonical', 'source-topic'])
+def test_chained_followup_does_not_lookup_unresolved_phrase_as_order_id(tmp_path, resolution):
+    from test_parsing import pdf_file
+    class Chained(MemoryModel):
+        def generate(self, system, payload, schema, budget):
+            if payload['phase'] == 'resolve_references':
+                self.payloads.append(deepcopy(payload))
+                term = '001' if len(payload['history']) == 1 else 'the second luminaire'
+                if len(payload['history']) > 1:
+                    if resolution == 'canonical':
+                        term = payload['history'][-1].get('resolved_subjects', ['the second luminaire'])[0]
+                    elif resolution == 'source-topic':
+                        term = 'Incoterms'
+                return {'references': [{'question_id': payload['history'][-1]['question_id'], 'term': term}],
+                        'needs_clarification': False}
+            if payload['phase'] == 'plan' and 'the second luminaire' in payload['question']:
+                self.payloads.append(deepcopy(payload))
+                return {'tools': [{'tool': 'lookup_orders', 'document_ids': [payload['documents'][0]['document_id']],
+                                   'order_ids': ['the second luminaire']}]}
+            return super().generate(system, payload, schema, budget)
+    model = Chained()
+    with TestClient(create_app(settings_for(tmp_path), processor=DocumentProcessor(TaskGateway()), model=model)) as client:
+        pdf = upload(client, 'products.pdf', pdf_file(tmp_path, ['002 power: 30 W. 001 power: 20 W. Incoterms 2020.']).read_bytes())
+        csv = upload(client, 'prices.csv', csv_bytes([row('other')]))
+        first = finish(client, {'conversation_id': 'chain', 'request_id': 'one',
+                               'question': 'Compare 002 and 001.', 'document_ids': [pdf]})
+        second = finish(client, {'conversation_id': 'chain', 'request_id': 'two',
+                                'question': 'What is the power of the second luminaire?',
+                                'document_ids': [pdf], 'previous_question_id': first['question_id']})
+        third = finish(client, {'conversation_id': 'chain', 'request_id': 'three',
+                               'question': 'Which Incoterms version?' if resolution == 'source-topic' else 'What is its price here?',
+                               'document_ids': [pdf if resolution == 'source-topic' else csv], 'previous_question_id': second['question_id']})
+        answer = third['answer']
+        if resolution == 'unresolved':
+            assert answer['outcome'] == 'needs_clarification'
+            assert answer['tool_results'] == []
+            assert answer['citations'] == []
+        elif resolution == 'canonical':
+            assert answer['outcome'] == 'exact_not_found'
+            assert answer['tool_results'][0]['result']['order_ids'] == ['001']
+            assert answer['memory']['references'][0]['term'] == '001'
+            assert answer['citations'] == []
+        else:
+            assert answer['outcome'] == 'answered'
+            assert answer['memory']['references'][0]['term'] == 'Incoterms'
+            assert {c['document_id'] for c in answer['citations']} == {pdf}

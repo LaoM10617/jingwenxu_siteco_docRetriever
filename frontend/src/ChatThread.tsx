@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { request } from './api';
+import SourcePreview from './SourcePreview';
 import type { Source, Turn } from './useChat';
 
 const stages: Record<string, string> = {queued:'Question queued',resolving_references:'Resolving conversation references',planning:'Preparing question',
@@ -10,14 +11,40 @@ const outcomes: Record<string, string> = {answered:'Answer',partial:'Partial ans
   needs_clarification:'Please clarify your question',insufficient_evidence:'Not enough evidence',
   exact_not_found:'No exact match'};
 
+function QuestionProgress({turn}: {turn: Turn}) {
+  const [now, setNow] = useState(Date.now);
+  const [opened] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const started = turn.submittedAt ?? (turn.task?.created_at ? turn.task.created_at * 1000 : opened);
+  const seconds = Math.max(0, Math.floor((now - started) / 1000));
+  return <div className="question-progress">
+    <p role="status">{turn.task ? stages[turn.task.stage] || 'Processing question' : 'Submitting question…'}</p>
+    <p className="muted">{seconds} s elapsed{!turn.submittedAt && !turn.task?.created_at ? ' since reopening this page' : ''}.</p>
+    <p className="muted">{turn.task?.stage === 'waiting_rate_limit'
+      ? 'Waiting for provider quota; there is no reliable completion estimate.'
+      : 'Questions have a 4-minute limit including queueing. We will keep checking automatically.'} Do not resend while this question is running.</p>
+  </div>;
+}
+
 function SourceView({source}: {source: Source}) {
+  const values = Array.isArray(source.raw_values) ? source.raw_values : [];
+  const fields = (source.headers || []).map((name, i) => ({name, value: values[i]}))
+    .filter(field => ['Bestellnummer', 'Listenpreis', 'gültig ab', 'EAN'].includes(field.name));
   const location = source.locator.kind === 'csv' ? `Record ${source.locator.record_number}` : `Page ${source.locator.page_number}`;
   return <details className="answer-source"><summary>{source.citation_id ? `${source.citation_id} · ` : ''}
     {source.original_filename || source.document_id.slice(0,8)} · {location}</summary>
     <p className="muted">Source #{source.document_id.slice(0,8)}</p>
     {source.context?.map((c,i) => <p key={i} className="source-context">{c.text}</p>)}
-    <pre>{source.text}</pre>
+    {fields.length > 0 && <dl className="source-fields">{fields.map(field => <div key={field.name}>
+      <dt>{field.name}</dt><dd>{typeof field.value === 'string' && field.value !== '' ? field.value : 'Empty in source'}</dd>
+    </div>)}</dl>}
+    {fields.length > 0 ? <details><summary>All original fields</summary><pre>{source.text}</pre></details>
+      : <pre>{source.text}</pre>}
     {source.price_status && <p className="muted">Price status: {source.price_status}. Original values retained.</p>}
+    <SourcePreview source={source} />
   </details>;
 }
 
@@ -56,7 +83,7 @@ export default function ChatThread({turns,retry,refresh}: {turns:Turn[];retry:(t
             : !turn.unavailable && <button onClick={refresh}>Check status now</button>}
         </div>}
         {!turn.error && (!task || ['queued','running'].includes(task.status)) &&
-          <p role="status">{task ? stages[task.stage] || 'Processing question' : 'Submitting question…'}</p>}
+          <QuestionProgress turn={turn} />}
         {task?.status === 'failed' && <div role="alert" className="error"><p>{task.error?.message}</p>
           <p>Question failed ({task.error?.code}). You can submit a new question.</p></div>}
         {answer && <div className="model-answer"><h2>{outcomes[answer.outcome] || answer.outcome}</h2>
@@ -73,7 +100,7 @@ export default function ChatThread({turns,retry,refresh}: {turns:Turn[];retry:(t
           </div>)}
           {answer.gaps.map((g,i) => <p className="answer-gap" key={i}>{g}</p>)}
           {answer.context.omitted_evidence_count > 0 && <p className="answer-gap">
-            {answer.context.omitted_evidence_count} retrieved passages were not included in the answer context.</p>}
+            {answer.context.omitted_evidence_count} retrieved passages were not included in the answer context. This limits context coverage; it does not by itself mean a stated fact is wrong.</p>}
           {answer.validation.rejected_segments > 0 && <p className="answer-gap">Some answer passages were withheld because their sources could not be verified.</p>}
           {answer.unresolved.filter(u => u.code==='exact_not_found').map((u,i) => <p className="answer-gap" key={i}>No exact match: {u.order_ids?.join(', ')}</p>)}
           {answer.warnings.length > 0 && <details className="warnings"><summary>{answer.warnings.length} source warnings</summary>
