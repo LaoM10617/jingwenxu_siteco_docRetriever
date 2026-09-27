@@ -1,4 +1,3 @@
-"""Processing result contract; concrete parsers and search indexes arrive later."""
 from dataclasses import dataclass, asdict
 from typing import Any
 
@@ -10,7 +9,6 @@ class PreparedDocument:
 
 
 class ProcessingFailure(Exception):
-    """Only fixed, public failure codes are accepted by the lifecycle owner."""
     def __init__(self, code):
         self.code = code
 

@@ -1,6 +1,9 @@
 """Question task behavior through HTTP with real storage and external model fake."""
 import time
 import csv
+import gc
+import sqlite3
+import weakref
 from io import StringIO
 from threading import Event
 import pytest
@@ -175,3 +178,76 @@ def test_entire_scope_and_schema_are_validated_before_model_calls(tmp_path):
                               ({'sql':'select *'},422), ({'document_ids':[]},422)]:
             assert client.post('/api/questions',json={**body,**extra}).status_code == status
         assert model.calls == 0
+
+
+@pytest.mark.parametrize('failure_at', ['execute', 'commit'])
+def test_failed_publication_recovers_and_releases_task_resources(service, tmp_path, monkeypatch, failure_at):
+    identity = publish(service, [row('001')])
+    publication_failed, recovery_failed = Event(), Event()
+    allow_recovery = Event()
+    references = []
+    class TrackedAnswers(AnswerService):
+        def answer(self, request, *, budget, **kwargs):
+            references.append((weakref.ref(self), weakref.ref(budget)))
+            return super().answer(request, budget=budget, **kwargs)
+    answers = AnswerService(QuestionTools(service, None), Model())
+    tasks = QuestionTasks(tmp_path / 'tasks.sqlite3', answers,
+                          answer_factory=lambda: TrackedAnswers(answers.tools, Model()))
+    connect = sqlite3.connect
+    class InterruptedConnection(sqlite3.Connection):
+        publishing = False
+        recovering = False
+        def execute(self, sql, parameters=()):
+            if sql.startswith('UPDATE question_tasks SET status=?,stage=?'):
+                self.publishing = True
+                if failure_at == 'execute' and not publication_failed.is_set():
+                    publication_failed.set()
+                    raise sqlite3.OperationalError('synthetic publication failure')
+            if publication_failed.is_set() and sql.startswith("UPDATE question_tasks SET status='failed',stage='failed',error=? WHERE id=?"):
+                self.recovering = True
+            return super().execute(sql, parameters)
+        def __exit__(self, exc_type, exc, traceback):
+            if exc_type is None:
+                if self.publishing and failure_at == 'commit' and not publication_failed.is_set():
+                    self.rollback()
+                    publication_failed.set()
+                    raise sqlite3.OperationalError('synthetic publication commit failure')
+                if self.recovering and not allow_recovery.is_set():
+                    self.rollback()
+                    recovery_failed.set()
+                    raise sqlite3.OperationalError('synthetic recovery commit failure')
+            return super().__exit__(exc_type, exc, traceback)
+    monkeypatch.setattr(sqlite3, 'connect', lambda *args, **kwargs:
+                        connect(*args, **kwargs, factory=InterruptedConnection))
+    body = {'conversation_id': 'a', 'request_id': 'one', 'question': '001', 'document_ids': [identity]}
+    try:
+        first = tasks.submit(body)
+        assert publication_failed.wait(3)
+        assert recovery_failed.wait(3)
+        allow_recovery.set()
+        for _ in range(150):
+            result = tasks.get(first['question_id'], 'a')
+            if result['status'] == 'failed':
+                break
+            time.sleep(.02)
+        assert result['status'] == 'failed'
+        assert result['answer'] is None
+        assert result['error']['code'] == 'question_timeout'
+        assert tasks.submit(body)['question_id'] == first['question_id']
+        second = tasks.submit({**body, 'request_id': 'two'})
+        for _ in range(150):
+            result = tasks.get(second['question_id'], 'a')
+            if result['status'] == 'completed':
+                break
+            time.sleep(.02)
+        assert result['status'] == 'completed'
+        # Weak references observe resource lifetime without inspecting task dictionaries.
+        for _ in range(100):
+            gc.collect()
+            if all(ref() is None for ref in references[0]):
+                break
+            time.sleep(.02)
+        assert all(ref() is None for ref in references[0])
+    finally:
+        allow_recovery.set()
+        tasks.stop()

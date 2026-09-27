@@ -103,13 +103,110 @@ materials and your own Gemini/Voyage keys. Commands and configuration:
 
 ## 6. Technical choices and rationale
 
-To be completed after discussion.
+1. **Scope driven by real documents.** We inspected SITECO materials and focused
+   on three workflows: finding clauses, comparing product specifications, and
+   looking up order prices. Within two days, prioritizing text PDFs, simple
+   parameter tables and a defined CSV format left more time for source accuracy
+   and a working end-to-end demo.
+
+2. **FastAPI, React and Docker Compose.** FastAPI provides typed API validation
+   alongside Python's document-processing ecosystem, while React/TypeScript
+   supports the upload, conversation and source-viewing interactions. Familiarity
+   with this stack reduced implementation risk; two containers retain independent
+   frontend/backend builds with a single Compose startup command.
+
+3. **Layout-aware parsing and chunking.** pdfplumber supplies text and coordinates,
+   which we group within each page while retaining headings, table headers and
+   source locations. Chunks follow complete clauses or table rows, targeting
+   roughly 2,400 characters with a 6,000-character ceiling, to keep product
+   ownership and qualifying conditions together.
+
+4. **Different retrieval paths for text and records.** PDF retrieval combines
+   SQLite FTS5/BM25 and Voyage vectors through RRF, covering literal identifiers
+   and semantic matches without calibrating their raw scores. Price-list CSVs use
+   exact order lookup to avoid substituting similar products; SQLite and per-document
+   FAISS exact indexes keep storage local and document selection explicit.
+
+5. **Hosted models with runtime configuration.** Gemini is the default generation
+   path, Groq is a configurable alternative, and Voyage provides embeddings,
+   avoiding local model downloads and GPU requirements. Settings accepts the user's
+   own keys and inference/retrieval options, with backend calls bound to the
+   configuration accepted for each task. The embedding model remains fixed to
+   preserve index compatibility.
+
+6. **A chat interface centered on evidence.** The conversation occupies the main
+   workspace, with materials and settings in a collapsible sidebar. Expandable
+   citations, PDF page highlights and CSV record previews make checking an answer
+   part of the normal interaction.
+
+7. **Bounded tasks and focused conversation memory.** Background processing and
+   status polling accommodate ingestion and model latency without adding an
+   external queue service; documents become queryable after complete index
+   publication. Follow-ups use limited history to resolve subjects, then retrieve
+   fresh evidence from the selected documents, while supported calculations use
+   deterministic tools.
+
+8. **Optional reranking guided by evaluation.** We tested reranking on the same
+   candidate sets before exposing it as an optional setting. In the formal small
+   evaluation, it increased required-evidence coverage from 10/12 to 11/12 without
+   increasing the number of fully covered questions. It remains off by default
+   so its coverage benefit can be weighed against another provider call and latency.
 
 ## 7. Diagnosed issues and next improvements
 
-- Some prose-PDF evidence is lost during final ranking: improve section coverage.
-- Answers can omit conditions or misattribute evidence: improve answer completeness
-  and grounding.
-- Provider failures can block follow-up turns: improve diagnostics and recovery.
-- Sentence-final periods previously blocked valid order IDs: fixed; live regression
-  is pending.
+### Retrieval coverage
+
+Some prose-PDF evidence is lost during final ranking.
+
+**Possibly involved:** [retrieval/pdf.py](backend/app/retrieval/pdf.py),
+[fusion.py](backend/app/retrieval/fusion.py), and
+[reranking.py](backend/app/reranking.py).
+
+**Diagnosis:** The necessary evidence is present in the vector results but is not
+fully reflected in the final output of the default RRF; therefore, we should first
+examine candidate fusion, Top-K, and passage coverage.
+
+### Answer completeness and attribution
+
+Answers can omit conditions or misattribute evidence.
+
+**Possibly involved:** `ANSWER` prompting, evidence organization, and output
+verification in [answers.py](backend/app/answers.py).
+
+**Diagnosis:** E01 stems from an incomplete response regarding the qualifying
+conditions present in the evidence; E02 additionally involves an error in
+attribute attribution. Since the existing prompt already requires the retention
+of qualifiers and attribution, simply adding a phrase like "please answer
+accurately" may not be effective. Potential approaches include providing
+object-by-object responses, ensuring coverage of conditions and exceptions, and
+avoiding the mistake of equating "not retrieved" with "not present in the document."
+
+### Provider failures
+
+Provider failures can block follow-up turns.
+
+**Possibly involved:** [generation.py](backend/app/generation.py), `QuestionBudget`
+in [questions.py](backend/app/questions.py), and
+[question_tasks.py](backend/app/question_tasks.py).
+
+**Diagnosis:** Two failed attempts lasting approximately 60 seconds confirm only
+that the call did not succeed; it is not yet possible to determine whether the
+cause lies with the network, the SDK, the server, or elsewhere. The first step is
+to add robust exception categorization and diagnostic checks for each stage.
+
+### Fixed issue
+
+- **Order-ID punctuation:** Sentence-final periods previously blocked valid order
+  IDs. Fixed.
+
+### Runtime and storage improvements
+
+- **Runtime wiring:** Unused imports, legacy test-oriented processing branches and
+  redundant startup adapters remain. Simplify service construction and refresh comments.
+- **Startup cleanup:** Partial startup failure can leave the ingestion worker
+  running. Ensure cleanup also covers failures during service initialization.
+- **Retry consistency:** Ingestion retries have a processor-cleanup race and
+  database/queue failure windows. Make retry scheduling consistent and recover
+  stranded jobs.
+- **Storage retention:** Failed uploads remain on disk without a retention limit.
+  Add deletion/expiry and a total storage quota.

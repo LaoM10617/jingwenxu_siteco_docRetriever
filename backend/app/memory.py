@@ -53,7 +53,7 @@ def resolve(model, question, history, budget):
         # Reusing that phrase would silently turn an unresolved reference into a lookup key.
         texts = turn['sources'] if subjects else [turn['question'], *turn['sources']]
         if ref.term not in subjects and not any(re.search(
-                r'(?<![\w./-])' + re.escape(ref.term) + r'(?![\w./-])', text) for text in texts):
+                r'(?<![\w./-])' + re.escape(ref.term) + r'(?![\w/-]|\.[\w./-])', text) for text in texts):
             return None, memory
     memory['references'] = [r.model_dump() for r in result.references]
     # Do not accept an arbitrary model rewrite that could invent an exact lookup key.

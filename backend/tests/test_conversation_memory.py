@@ -22,6 +22,55 @@ class MemoryModel(ScopeModel):
         return super().generate(system, payload, schema, budget)
 
 
+@pytest.mark.parametrize('order', ['001', 'AB.01', 'AB/01', 'AB-01'])
+def test_followup_resolves_sentence_final_identifier_after_exact_miss(tmp_path, order):
+    class LiteralModel(MemoryModel):
+        def generate(self, system, payload, schema, budget):
+            result = super().generate(system, payload, schema, budget)
+            if payload['phase'] == 'resolve_references':
+                result['references'][0]['term'] = order
+            elif payload['phase'] == 'plan':
+                result['tools'][0]['order_ids'] = [order]
+            return result
+    with TestClient(create_app(settings_for(tmp_path), processor=DocumentProcessor(),
+                              model=LiteralModel())) as client:
+        old = upload(client, 'old.csv', csv_bytes([row('other')]))
+        new = upload(client, 'new.csv', csv_bytes([row(order, '25,00')]))
+        first = finish(client, {'conversation_id': 'a', 'request_id': 'one',
+                               'question': f'Price of {order}.', 'document_ids': [old]})
+        assert first['answer']['outcome'] == 'exact_not_found'
+        assert first['answer']['citations'] == []
+        second = finish(client, {'conversation_id': 'a', 'request_id': 'two',
+                                'question': 'And its price here?', 'document_ids': [new],
+                                'previous_question_id': first['question_id']})
+        assert second['answer']['outcome'] == 'answered'
+        assert second['answer']['memory']['references'][0]['term'] == order
+        assert {s['document_id'] for s in second['answer']['citations']} == {new}
+
+
+@pytest.mark.parametrize('order', ['001.A', '001.1', '001/part', '001-A', 'X001', 'A.001'])
+def test_followup_rejects_identifier_substrings_after_exact_miss(tmp_path, order):
+    class FullOrderModel(MemoryModel):
+        def generate(self, system, payload, schema, budget):
+            result = super().generate(system, payload, schema, budget)
+            if payload['phase'] == 'plan':
+                result['tools'][0]['order_ids'] = [order]
+            return result
+    model = FullOrderModel()
+    with TestClient(create_app(settings_for(tmp_path), processor=DocumentProcessor(), model=model)) as client:
+        doc = upload(client, 'prices.csv', csv_bytes([row('other')]))
+        first = finish(client, {'conversation_id': 'a', 'request_id': 'one',
+                               'question': f'Price of {order}.', 'document_ids': [doc]})
+        assert first['answer']['outcome'] == 'exact_not_found'
+        count = len(model.payloads)
+        second = finish(client, {'conversation_id': 'a', 'request_id': 'two',
+                                'question': 'And its date?', 'document_ids': [doc],
+                                'previous_question_id': first['question_id']})
+        assert second['answer']['outcome'] == 'needs_clarification'
+        assert second['answer']['tool_results'] == second['answer']['citations'] == []
+        assert len(model.payloads) == count + 1
+
+
 def test_followup_requeries_current_scope_and_survives_restart(tmp_path):
     settings = settings_for(tmp_path)
     model = MemoryModel()

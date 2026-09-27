@@ -26,6 +26,7 @@ class QuestionTasks:
         self.bound_answers = {}
         self.condition, self.stopped = Condition(), Event()
         self.pending, self.budgets = deque(), {}
+        self.pending_cleanup = set()
         with closing(sqlite3.connect(database)) as db, db:
             db.execute('''CREATE TABLE IF NOT EXISTS question_tasks (
                 id TEXT PRIMARY KEY, conversation TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -172,9 +173,15 @@ class QuestionTasks:
     def _monitor(self):
         while not self.stopped.wait(.1):
             try:
-                with self.condition, closing(sqlite3.connect(self.database)) as db, db:
-                    self._expire(db)
-                    db.execute("DELETE FROM question_tasks WHERE conversation_expires<=? AND status IN ('completed','failed')", (time.time(),))
+                with self.condition:
+                    with closing(sqlite3.connect(self.database)) as db, db:
+                        self._expire(db)
+                        db.execute("DELETE FROM question_tasks WHERE conversation_expires<=? AND status IN ('completed','failed')", (time.time(),))
+                    # Release failed publications only after their expiry transaction commits.
+                    for identity in self.pending_cleanup:
+                        self.budgets.pop(identity, None)
+                        self.bound_answers.pop(identity, None)
+                    self.pending_cleanup.clear()
             except (sqlite3.Error, OSError):
                 # Reads and publication also check deadlines; never publish late on a storage error.
                 continue
@@ -222,6 +229,7 @@ class QuestionTasks:
                     except (sqlite3.Error, OSError):
                         # Preserve an explicit failure if storage recovers before retention expiry.
                         budget.deadline = 0
+                        self.pending_cleanup.add(identity)
                         continue
                     self.budgets.pop(identity, None)
                     self.bound_answers.pop(identity, None)
