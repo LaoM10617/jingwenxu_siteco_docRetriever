@@ -3,6 +3,7 @@
 Approved P-029, baseline 29b308978783d3f214174900eb1ed84f1919b4cf.
 
 POST /api/questions takes conversation_id, request_id, question, document_ids.
+M3/P-031 adds optional previous_question_id; see [temporary memory contract](m3-memory-contract.md).
 It returns 202 with question_id, frozen request and task status. Same conversation /
 request ID and normalized content returns the same task; changed content returns
 409 request_conflict. Validate all selected documents before admission/model calls.
@@ -32,7 +33,8 @@ the answer or promote newly browsed rows into the original citation set.
 Browser: per-tab temporary conversation/request metadata supports refreshing and
 resuming GET polling without automatic POST resubmission. No cross-conversation
 history goes to the server/model. A new conversation starts with empty turns/scope.
-Each question is independent; no pronoun resolution or saved long-term chat history.
+M3/P-031 enables bounded same-conversation reference resolution with fresh scoped evidence;
+long-term chat history remains out of scope. Conversation retention is fixed from its first turn.
 Only a user-triggered resend of the same submission can recover an ambiguous POST;
 the request ID and original content stay unchanged. Terminal retry is a new request.
 

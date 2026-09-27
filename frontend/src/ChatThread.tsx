@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { request } from './api';
 import type { Source, Turn } from './useChat';
 
-const stages: Record<string, string> = {queued:'Question queued',planning:'Preparing question',
+const stages: Record<string, string> = {queued:'Question queued',resolving_references:'Resolving conversation references',planning:'Preparing question',
   retrieving:'Searching selected materials',querying_csv:'Looking up exact order numbers',
   waiting_rate_limit:'Waiting for model quota',generating:'Writing answer',calculating:'Checking numbers',
   validating:'Checking sources'};
@@ -60,6 +60,7 @@ export default function ChatThread({turns,retry,refresh}: {turns:Turn[];retry:(t
         {task?.status === 'failed' && <div role="alert" className="error"><p>{task.error?.message}</p>
           <p>Question failed ({task.error?.code}). You can submit a new question.</p></div>}
         {answer && <div className="model-answer"><h2>{outcomes[answer.outcome] || answer.outcome}</h2>
+          {!!answer.memory?.references.length && <p className="muted">Subjects resolved from conversation: {answer.memory.references.map(r => r.term).join(', ')}. Sources checked in the current materials.</p>}
           {answer.outcome === 'needs_clarification' && <p>Include explicit order numbers or clarify what you want to find in the selected materials.</p>}
           {answer.outcome === 'exact_not_found' && <p>No exact record matched the requested order numbers in this scope.</p>}
           {answer.outcome === 'insufficient_evidence' && <p>The retrieved evidence does not support an answer to this question.</p>}

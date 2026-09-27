@@ -20,7 +20,7 @@ class Gateway:
         self.entered, self.release = Event(), Event()
         self.release.set()
 
-    def embed(self, texts, *, input_type, stop=None, on_wait=None):
+    def embed(self, texts, *, input_type, stop=None, on_wait=None, on_start=None):
         self.calls.append(input_type)
         self.entered.set()
         assert self.release.wait(5)
@@ -174,7 +174,7 @@ def test_semantic_failure_never_silently_returns_lexical_results(tmp_path):
 
 def test_ready_queries_continue_during_ingestion_wait(tmp_path):
     class Waiting(Gateway):
-        def embed(self, texts, *, input_type, stop=None, on_wait=None):
+        def embed(self, texts, *, input_type, stop=None, on_wait=None, on_start=None):
             if input_type == 'document' and 'waiting' in texts[0]:
                 on_wait()
                 self.entered.set()

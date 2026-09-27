@@ -180,8 +180,9 @@ PDFs (it writes to the same HOST_DATA_DIR bind mount):
 docker compose run --rm --no-deps backend python -m app.prepare_tokenizer /app/runtime/tokenizers
 ```
 
-Replace the example destination with your actual `HOST_DATA_DIR/tokenizers/`.
-The script places `voyage-4-tokenizer.json` there. This is tokenizer
+Keep `/app/runtime/tokenizers` as the container destination. Set `HOST_DATA_DIR`
+to choose the host bind-mount directory; the resulting host file is
+`HOST_DATA_DIR/tokenizers/voyage-4-tokenizer.json`. This is tokenizer
 data, not model weights; startup never downloads it. Keys, tokenizer and runtime files are not
 baked into images. Recreate the backend after changing its configuration.
 
@@ -295,8 +296,9 @@ preserves ordered headers, raw string values and logical record numbers. A valid
 normalized price is a decimal string; missing/invalid prices are null.
 `DocumentService.lookup_orders(order_ids, document_ids, offset=0, limit=50)` is
 the deterministic backend entry: explicit ready CSV scope, exact case-sensitive
-keys, all duplicate sources, full counts and pagination. There is no production
-query HTTP route yet; the later chat layer will call this method.
+keys, all duplicate sources, full counts and pagination. The production question
+task API calls this method through validated planning; completed tasks expose
+CSV pagination through their frozen scope (see the question API above).
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/documents
@@ -307,6 +309,29 @@ M2.2 acceptance covers upload identity/limits, lifecycle, publication gates,
 interruption and the HTTP contract. Controlled processors prove successful
 publication in tests. M2.3 accepts PDF-to-evidence and durable coverage; M2.5
 accepts real CSV document-to-ready and exact lookup. M2.6 accepts configured PDF
-publication, scoped hybrid retrieval and restoration; question answering remains pending.
+publication, scoped hybrid retrieval and restoration. M2.7 adds evidence-based
+answers and validated citations; M2.8 verifies fresh PDF/CSV uploads through the
+Docker browser chat and source display (see [acceptance](eval/results/m28_chat.md)).
 Use HTTP to read live state; do not open the
 running container's SQLite database from Windows.
+
+## Temporary conversation memory (M3)
+
+Follow-up submissions may include `previous_question_id` referring to a completed
+question in the same conversation. The browser attaches the most recent completed
+turn and preserves that link when recovering an ambiguous submission. Refresh uses
+GET polling and does not automatically POST questions again.
+
+The backend resolves subjects from at most 6 recent whole turns (12,000 serialized
+characters total), then retrieves evidence only from the current selected documents.
+History is not evidence for the new answer. Missing or ambiguous references require
+clarification. The extra structured model call shares the original 240-second budget.
+Model reference selection can still be wrong; inspect the displayed resolved subjects
+and current citations. Reference identity validation does not prove semantic accuracy.
+
+Retention ends 24 hours after the conversation's first question, without renewal by
+follow-ups. The API returns `conversation_expires_at`; expired conversations require
+an explicit new conversation. Completed history survives backend restarts during
+retention; unfinished tasks remain interrupted and are never automatically replayed.
+There is no cross-conversation memory, long-term history, or authentication.
+See [the memory contract](docs/m3-memory-contract.md) for bounds and verification.

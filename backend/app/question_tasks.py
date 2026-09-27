@@ -15,6 +15,7 @@ from app.questions import Identity, QuestionRequest, QuestionBudget, validated
 
 class Submission(QuestionRequest):
     request_id: Identity
+    previous_question_id: Identity | None = None
 
 
 class QuestionTasks:
@@ -29,6 +30,12 @@ class QuestionTasks:
                 request TEXT NOT NULL, status TEXT NOT NULL, stage TEXT NOT NULL,
                 created REAL NOT NULL, deadline REAL NOT NULL, answer TEXT, error TEXT,
                 UNIQUE(conversation, request_id))''')
+            columns = {r[1] for r in db.execute('PRAGMA table_info(question_tasks)')}
+            if 'conversation_expires' not in columns:
+                db.execute('ALTER TABLE question_tasks ADD COLUMN conversation_expires REAL')
+                db.execute("""UPDATE question_tasks SET conversation_expires=(
+                    SELECT min(t.created)+86400 FROM question_tasks t
+                    WHERE t.conversation=question_tasks.conversation)""")
             db.execute("UPDATE question_tasks SET status='failed',stage='failed',error=? WHERE status IN ('queued','running')",
                        (json.dumps(self.error('question_interrupted', 'The backend restarted. Submit a new question.')),))
         self.worker = Thread(target=self._work, daemon=True, name='question-worker')
@@ -49,6 +56,7 @@ class QuestionTasks:
         request = json.loads(row['request'])
         return {'question_id': row['id'], **request, 'status': row['status'], 'stage': row['stage'],
                 'created_at': row['created'], 'deadline_at': row['deadline'],
+                'conversation_expires_at': row['conversation_expires'],
                 'answer': json.loads(row['answer']) if row['answer'] else None,
                 'error': json.loads(row['error']) if row['error'] else None}
 
@@ -56,17 +64,33 @@ class QuestionTasks:
         received, budget = time.time(), QuestionBudget(now=self.now)
         body = validated(Submission, value, 'invalid_question').model_dump()
         request_id = body.pop('request_id')
+        if body['previous_question_id'] is None:
+            body.pop('previous_question_id')
         body['document_ids'] = list(dict.fromkeys(body['document_ids']))
         encoded = json.dumps(body, sort_keys=True, ensure_ascii=False)
         with self.condition, closing(sqlite3.connect(self.database)) as db, db:
             db.row_factory = sqlite3.Row
-            db.execute("DELETE FROM question_tasks WHERE created<? AND status IN ('completed','failed')", (received - 86400,))
+            db.execute("DELETE FROM question_tasks WHERE conversation_expires<=? AND status IN ('completed','failed')", (received,))
             old = db.execute('SELECT * FROM question_tasks WHERE conversation=? AND request_id=?',
                              (body['conversation_id'], request_id)).fetchone()
             if old:
                 if old['request'] != encoded:
                     raise DocumentError('request_conflict', 'This request ID already has different content.', 409)
                 return self._public(old)
+            expires = db.execute('SELECT min(conversation_expires) FROM question_tasks WHERE conversation=?',
+                                 (body['conversation_id'],)).fetchone()[0] or received + 86400
+            parent_id = body.get('previous_question_id')
+            if parent_id:
+                parent = self._load(db, parent_id)
+                if parent is None or parent['conversation'] != body['conversation_id']:
+                    raise DocumentError('memory_unavailable', 'Previous question is unavailable or expired. Start a new conversation or restate the question.', 409)
+                if parent['conversation_expires'] <= received:
+                    raise DocumentError('memory_expired', 'Conversation memory expired. Start a new conversation.', 409)
+                if parent['status'] != 'completed':
+                    raise DocumentError('memory_not_completed', 'Previous question must be completed.', 409)
+                expires = parent['conversation_expires']
+            if expires <= received:
+                raise DocumentError('memory_expired', 'Conversation memory expired. Start a new conversation.', 409)
             for identity in body['document_ids']:
                 doc = self.answers.tools.documents.get(identity)
                 if doc is None:
@@ -79,20 +103,38 @@ class QuestionTasks:
                 raise DocumentError('question_capacity', 'Temporary question storage is full. Try later.', 503, True)
             budget.check()
             identity = uuid4().hex
-            db.execute('INSERT INTO question_tasks VALUES (?,?,?,?,?,?,?,?,?,?)',
+            db.execute('INSERT INTO question_tasks VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                        (identity, body['conversation_id'], request_id, encoded, 'queued', 'queued', received,
-                        received + 240, None, None))
+                        received + 240, None, None, expires))
             db.commit()
             self.budgets[identity] = budget
             self.pending.append(identity)
             self.condition.notify_all()
             return self._public(self._load(db, identity))
 
+    def _history(self, db, identity, conversation):
+        history, used = [], 0
+        while identity and len(history) < 6:
+            row = self._load(db, identity)
+            if row is None or row['conversation'] != conversation or row['conversation_expires'] <= time.time():
+                raise DocumentError('memory_unavailable', 'Conversation history is unavailable or expired. Start a new conversation.', 409)
+            request, answer = json.loads(row['request']), json.loads(row['answer'])
+            turn = {'question_id': identity, 'question': request['question'],
+                    'segments': [s['text'] for s in answer['segments']], 'gaps': answer['gaps'],
+                    'sources': [s['text'] for s in answer['citations']]}
+            size = len(json.dumps(turn, ensure_ascii=False))
+            if used + size > 12000:
+                break
+            history.append(turn)
+            used += size
+            identity = request.get('previous_question_id')
+        return list(reversed(history))
+
     def get(self, identity, conversation):
         with self.condition, closing(sqlite3.connect(self.database)) as db, db:
             self._expire(db)
             row = self._load(db, identity)
-            if row is None or row['conversation'] != conversation or row['created'] < time.time() - 86400:
+            if row is None or row['conversation'] != conversation or row['conversation_expires'] <= time.time():
                 raise DocumentError('question_not_found', 'Question not found or expired.', 404)
             return self._public(row)
 
@@ -123,7 +165,7 @@ class QuestionTasks:
             try:
                 with self.condition, closing(sqlite3.connect(self.database)) as db, db:
                     self._expire(db)
-                    db.execute("DELETE FROM question_tasks WHERE created<? AND status IN ('completed','failed')", (time.time() - 86400,))
+                    db.execute("DELETE FROM question_tasks WHERE conversation_expires<=? AND status IN ('completed','failed')", (time.time(),))
             except (sqlite3.Error, OSError):
                 # Reads and publication also check deadlines; never publish late on a storage error.
                 continue
@@ -144,7 +186,13 @@ class QuestionTasks:
                     if row is None or row['status'] != 'queued':
                         continue
                     db.execute("UPDATE question_tasks SET status='running',stage='planning' WHERE id=?", (identity,))
-                answer = self.answers.answer(json.loads(row['request']), budget=budget,
+                request = json.loads(row['request'])
+                parent_id = request.pop('previous_question_id', None)
+                memory = {}
+                if parent_id:
+                    with closing(sqlite3.connect(self.database)) as db:
+                        memory = {'history': self._history(db, parent_id, row['conversation'])}
+                answer = self.answers.answer(request, **memory, budget=budget,
                     on_stage=lambda stage: self._stage(identity, stage),
                     on_wait=lambda: self._stage(identity, 'waiting_rate_limit'))
                 budget.check()

@@ -1,73 +1,70 @@
-# 当前交接：M2.8聊天与空状态Docker冒烟完成，待M2.9最终审查
+# 当前交接：M3通过，用户授权提交推送
 
-2026-09-27。M2.1–M2.8已按各自范围实施/验证。用户明确把两路真实浏览器闭环前移至M2.8。
-M2.9固定范围Standards/Spec审查与修复仍待做；M2尚未最终验收。M3多文档/状态/失败矩阵独立。
+2026-09-27。M3.1–M3.5及P-031临时memory已实现，受控与授权真实组合核验完成。
+首轮双轴审查：Standards一项过时文档状态已修，Spec零发现；最终收尾两轴均零未关闭发现，结果见
+`tmp/m35/review-final-receipt.json`。没有新增代码审查发现。
+验收说明eval/results/m3_checkpoint.md，实际成功/失败证据eval/results/m35_integration.md，
+详细过程logs/m3.md。进入M4前先按用户安排梳理：必做通过情况/紧急缺口、重要必做体验优化、原case选做项优先级、
+原case建议库的对应情况。本轮只提交推送，不展开该评审或生成评审材料；M5重建演示尚未完成。
 
-## 已确认范围与实际实现
+## Git与审查
 
-P-026：PDF FTS5/BM25+Voyage-4/1024+每文档FAISS+RRF；两路全局20、等权k60/final8，未调参。
-P-027/P-028：结构化条件→范围/schema→确定性工具→证据回答与引用，禁任意SQL/Python。
-Decimal保留原值/单位/条件；PDF计算仍仅独立显式单span、无额外context的安全子集，表格参数
-可以带来源列举，但不自动扩大数值归属计算。引用身份验证不是全部语义正确性的证明。
+M3审查冻结时main/HEAD与origin/main为88ad778baf6b272ccd8151e67f6801e767dce24d。
+用户随后授权将已审查的28项变更提交到main并推送origin；提交消息为
+Add multi-turn dialogue memory, clarify state and fault handling, and integrate and adapt more reusable code.
+当前提交标识与推送状态以git log/status和远端核对为准。实际M3审查基准仍固定88ad778。
+首轮review-1冻结27项变更+需求来源；最终review-final冻结全部staged/unstaged/untracked和收尾文档。
+两轴审查同一快照。manifest、原字节、完整diff、哈希和最终收据都在tmp/m35。
 
-新P-029和docs/m28-chat-contract.md：POST /api/questions立即202；GET任务状态；任务绑定
-CSV分页。完整范围先验证，conversation/request_id幂等，异内容409；每轮范围冻结、独立求解。
-不发跨conversation历史，不做多轮指代、持久聊天、SSE、前端自带Key或原文高亮。
-QuestionTasks在现有后端/SQLite：单worker、8等待、1000临时任务、24h保留；240秒总截止含排队，
-独立monitor/读取/发布控制终态。重启未完成任务interrupted，不自动重发；超时不能被迟到覆盖。
-同步SDK仍协作取消，超时worker可占用执行位直到网络返回。每次生成min(60s,剩余时间)，不重试。
+继承六份M2.9文档保留并纳入：README、milestone、current、logs/m2.md、m29_checkpoint、m3-handoff。
+接手五份匹配M2.9旧快照，logs/m2.md不同且不是换行差异；未回退，接手备份tmp/m3-intake。
+requirements_draft.md是既有忽略文件，仍只作本地需求来源，未force-add。未把密钥或材料提交。
+主要源码变更为processing.py额度恢复状态、question_tasks.py/answers.py/新memory.py、
+前端useChat/App/ChatThread；新增多文档/状态/业务/失败/memory后端测试和聊天/真实集成浏览器测试。
+另有CONTEXT、decisions、契约、里程碑/交接/验收文档。本次提交清单以git show及最终manifest为准；提交前只补充current/m3日志中的授权和下一步记录。
 
-useChat/ChatThread接原布局：消息、scope快照、真实阶段、分片来源/上下文、警告/省略/CSV分页。
-浏览器当前tab最多50轮临时元数据，刷新只GET；不明POST由用户同ID/内容重发，新会话清空范围。
-conversation标签是本地demo隔离，不是认证。API/任务记录与完整返回字段见契约。
+## 当前能力与边界
 
-app.prepare_tokenizer可在普通backend镜像一次性下载校验固定公开tokenizer；宿主helper委托
-同一实现。README写明无宿主Python/Node的Docker流程。双常驻容器和nginx复用，无额外服务。
-密钥仅backend运行时env，白名单构建context不含根Key/材料/runtime；provider日志仅阶段/
-状态/耗时/usage，不记录问题或原文。Embedding等待放行后恢复retrieving阶段。
+P-026–P-030继续适用：PDF全局20/20、等权RRF k60/final8未调参；CSV精确查询且原值/重复来源保留；
+Decimal和PDF保守归属门槛。被调用路由覆盖当前所选全部同类型文档，一路供应商故障整任务失败。
+202+轮询，240秒含排队，单worker/8等待、1000临时任务；超时后迟到不可覆盖，重启不自动重发。
+同步SDK可能占worker直到网络返回；来源身份不证明答案语义。
 
-## 实际验证与保留失败
+P-031：previous_question_id关联同会话已完成前轮，冻结请求；后端最近最多6轮、12000序列化字符，
+整轮保留。历史只辅助识别主题，当前范围重新取证，旧引用不进入新证据。原文词项须完整回查，
+规划/生成明确接收resolved_subjects，不按新证据排列再次解释序数。缺失/歧义澄清，模型故障仍失败。
+首轮固定24h不续期，额外解析共享240秒；刷新/重启保留期内继续，过期提示。模糊POST仅人工原请求
+恢复，不自动重发。会话标签不是认证，无跨会话/长期记忆。原case未明列memory，依据为用户确认。
 
-Windows261tests+10subtests(44.31s)，Linux Docker261+10(36.79s)，镜像siteco-backend:m28-test。
-TypeScript/Vite和两runtime镜像构建通过。最终静态Docker前端13浏览器检查通过、5旧真实
-opt-in跳过；独立新两路真实smoke1项通过(31.7s)。git diff --check通过。
-真实任务/SQLite/HTTP、外部模型与时钟替身覆盖去重/越界/截止/队列/重启/分页/响应性；浏览器
-覆盖等待、引用、刷新、同请求重发、部分结果、警告和重复来源。不是M3完整失败矩阵。
+## 最终实际验证
 
-首轮空tmp/m28-docker/runtime中PDF成功、CSV空计划误判需澄清，smoke正确失败；保留记录。
-单次probe支持提示语歧义：已补通用JSON计划/未知订单存在性由精确查询判断的说明，无样本
-硬编码、无改检索参数。不能据少量结果承诺模型规划稳定。随后另建空runtime重做两路成功：
-- PDF ready2.344s/问答20.693s，0MD5307L1830=3000K/18W/1.6kg，第2页引用，布局警告保留。
-- CSV ready2.453s/问答3.177s，51DB11EC11B1D=183,20/01.06.2026，逻辑记录1，浏览分页通过。
-两路均从浏览器新上传/现场建索引/真实模型回答，引用展开与刷新通过，截图已核对原文。
-没有读取保留题或复制开发索引/答案集，使用用户已授权原材料/Gemini+Voyage。
-两轮加probe共Voyage4calls/2032tokens、Gemini6calls；无provider失败/重试，首轮CSV为质量失败。
-最终PDF等待观察约16.8秒（1.5秒轮询），成功SDK调用<2秒，主耗时为20秒共享调用间隔。
-详见eval/results/m28_chat.md，原报告和截图在tmp/m28-docker与tmp/m28-clean（忽略）。
-本地核对真实Key未出现在image配置/history或前端静态产物，frontend环境无provider Key。
+- Windows完整308+10subtests/60.00s，Linux新m35-test同308+10/49.05s。
+- 新版静态Docker浏览器28通过/6历史opt-in跳过/26.5s，含真实代理；build及镜像/前端密钥检查通过。
+- 真实初始4问：条款+价格、CSV追问日期、PDF两型号+CSV精确未命中正确；第4问解析正确但生成
+  错答“第二款”。原失败tmp/m35/real-results-initial-failure.json完整保留，不能当通过。
+- 明确resolved_subjects传递/约束后，仅定向重问原CSV/PDF追问，正确返回01.06.2026与4000K/9W。
+  其测试夹具刷新时覆盖storage导致后半失败，修夹具后用已有结果纯GET恢复/刷新2项通过、零POST。
+  未声称初始完整真实脚本全绿；共6个新真实问题，没有循环重试掩盖失败。
+- PDF原页和CSV授权首记录核对完成；条款2020、原价183,20、各型号归属正确，精确未命中不冒充PDF命中。
+  首问真实Voyage限流retry_after60后82.219s成功，等待/健康/轮询正常，未改额度或付费。
+- 运行容器23个后端源码文件与工作区逐字节匹配；HTTP三文档ready、两个修复结果completed不变。
+  diff --check通过。受控重启为生命周期测试，不冒充Docker强杀；小样本不证明通用可靠率。
 
-## Git与运行
+## 当前运行与注意事项
 
-main/origin/main仍29b308978783d3f214174900eb1ed84f1919b4cf，Implemented model answer，前轮已push。
-本轮M2.8未commit/push。改动含任务模块/HTTP/阶段、规划提示、provider日志、前端聊天/来源、
-Docker内tokenizer入口、README/dockerignore、后端及浏览器测试、P-029/契约/验收/日志。
-M2.8基准29b3089；M2最终审查基准4307e22，必须固定目标且纳入staged/unstaged/untracked，
-按AGENTS/code-review双轴并行子代理。当前未进行该阶段审查，不声称M2最终完成。
+Compose siteco-m28-smoke双容器healthy，最新http://127.0.0.1:18095/，backend18094，已部署本次修复。
+运行数据D:/Projects/Retrieval_SITECO/tmp/m28-clean/runtime；没有复制开发索引或迁移路径。
+ready ID：Rondel7758b95074074557b8bd2a4b72ef4237；CSV eeb7e731107d4759b3dd1d84f0c870ab；
+新条款f1338ce4cdc44f7d82e1ce5232e590ef。任务到期不等于文档丢失。旧18091/18089/18087未动。
+运行SQLite仅后端访问，检查HTTP；Docker缓存/镜像C盘、数据D盘。没有额外常驻服务，临时Vite已关闭。
+仅授权D01/D06/D09外发，Voyage共享3RPM/10KTPM、至少20秒间隔，少量串行；付费切换先通知。
+密钥根目录ignore、仅后端运行时注入，不输出/提交/入镜像或前端。保留题不用来调参，108页报告不在基线。
+不自动加入OCR/视觉/本地生成/长期历史/SSE/取消API/认证/原文高亮。
+普通shell沙箱初始化失败，使用require_escalated；Docker CLI为LOCALAPPDATA/Programs/DockerDesktop/
+resources/bin/docker.exe，Python backend/.venv/Scripts/python.exe，根目录pytest包含tracing/subtests。
 
-最新预览 http://127.0.0.1:18095/，backend18094，Compose siteco-m28-smoke，两个healthy。
-数据D:/Projects/Retrieval_SITECO/tmp/m28-clean/runtime。PDF7758b95074074557b8bd2a4b72ef4237，
-CSV eeb7e731107d4759b3dd1d84f0c870ab，均ready。task保留24h，过期后来源文档仍在。
-首轮siteco-m28-acceptance(18093/18092)已停止，tmp/m28-docker/runtime保留失败取证。
-旧siteco-m26-acceptance(18091/18090)未改；不访问运行中SQLite，检查走HTTP。
-Docker镜像/缓存C盘，runtime D盘；不迁移。Key根目录忽略，不输出/提交/入镜像。
-Voyage共享3RPM/10KTPM、至少20秒间隔、query优先；真实调用少量串行，切付费前先通知用户。
-20MiB/PDF50页/CSV20000条/10活跃文档；无OCR/视觉推理/本地模型，108页报告不在基线。
+## 剩余风险
 
-默认shell沙箱初始化失败，命令使用require_escalated。本轮真实验收授权沿用用户明确确认，
-无需再询问同范围外发。Python backend/.venv/Scripts/python.exe；Docker CLI在
-LOCALAPPDATA/Programs/DockerDesktop/resources/bin。临时启动/密钥检查脚本位于tmp，均不含密钥值。
-
-## 下一步
-
-M2.9：按固定基准4307e22和明确全工作区范围做Standards/Spec双轴审查、修复、必要回归，
-再确定M2最终验收。两路smoke不能替代M3多文档/处理状态/来源及失败矩阵，不新增候选范围。
+真实ordinal错误已修并定向复验，但模型选错主题/自由文本错归属仍可能发生；不是确定性语义验证。
+PDF布局/噪声、CSV规划可靠率和供应商等待风险保留。大历史轮次可能无法纳入12k预算而澄清。
+旧任务迁移只能用最早保留任务推定首轮，已清理历史不能重建。最终收尾复核和快照收据不可遗漏。

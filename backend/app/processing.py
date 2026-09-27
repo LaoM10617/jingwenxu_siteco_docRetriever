@@ -53,7 +53,8 @@ class PdfParsingProcessor(UnavailableProcessor):
         report('embedding')
         try:
             vectors = self.gateway.embed([e['retrieval_text'] or e['text'] for e in evidence],
-                input_type='document', stop=stop, on_wait=lambda: report('waiting_rate_limit'))
+                input_type='document', stop=stop, on_wait=lambda: report('waiting_rate_limit'),
+                on_start=lambda: report('embedding'))
         except EmbeddingError as exc:
             raise ProcessingFailure(exc.code) from None
         report('indexing')

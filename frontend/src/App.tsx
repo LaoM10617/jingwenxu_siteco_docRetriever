@@ -487,7 +487,7 @@ export default function App() {
               This tab keeps the current conversation temporarily so you can refresh and resume a question.
             </p>
             <p className="muted">
-              Long-term saved conversations are not available. Each question is answered independently.
+              Conversation memory lasts 24 hours from the first question. Each answer uses freshly checked sources.
             </p>
           </section>
         )}
@@ -601,7 +601,8 @@ export default function App() {
             </div>
           </div>
           <p className="composer-note">
-            Each question uses the selected materials independently. Include full product or order numbers.
+            {chat.expired ? 'Conversation memory expired. Start a new conversation.' :
+              'Follow-up questions use up to 6 recent turns. Answers use only the currently selected materials.'}
             {chat.chat.turns.length >= 50 && ' Start a new conversation to ask more questions.'}
           </p>
         </div>
