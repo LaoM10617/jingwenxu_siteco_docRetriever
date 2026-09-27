@@ -169,7 +169,9 @@ def test_question_rejects_unknown_history_and_coercion(service, changes):
 def test_duplicate_route_and_substring_order_are_rejected(service):
     identity = publish(service, [row('001')])
     tool = {'tool': 'lookup_orders', 'document_ids': [identity], 'order_ids': ['001']}
-    for question, plan in [('001', [tool, tool]), ('X001', [tool]), ('001-A', [tool])]:
+    for question, plan in [('001', [tool, tool]), ('X001', [tool]), ('001-A', [tool]),
+                           ('001.A', [tool]), ('001.1', [tool]), ('001/part', [tool]),
+                           ('A.001', [tool])]:
         with pytest.raises(DocumentError) as error:
             QuestionTools(service, None).prepare(
                 {'conversation_id': 'a', 'question': question, 'document_ids': [identity]},
@@ -206,3 +208,24 @@ def test_plan_cannot_silently_shrink_selected_same_type_scope(service):
             planner=lambda *args: {'tools': [{'tool': 'lookup_orders', 'document_ids': [first],
                                               'order_ids': ['001']}]})
     assert error.value.code == 'invalid_tool_plan'
+
+
+@pytest.mark.parametrize('orders, question', [
+    (['51DB11EC11B1D', '51DB11EC11D1D'],
+     'Vergleiche Preis und EAN von 51DB11EC11B1D und 51DB11EC11D1D.'),
+    (['B01S6B4A07145E', 'B01S7B4A07150E'],
+     'Vergleiche die Listenpreise und Gültigkeitsdaten von B01S6B4A07145E und B01S7B4A07150E.'),
+    (['AB.01'], 'Preis von AB.01.'),
+    (['001'], 'Preis von 001. Bitte mit Quelle.'),
+])
+def test_explicit_order_before_sentence_period_reaches_exact_lookup(service, orders, question):
+    identity = publish(service, [row(order, '12,50') for order in orders])
+    result = QuestionTools(service, None).prepare(
+        {'conversation_id': 'a', 'question': question, 'document_ids': [identity]},
+        planner=lambda *args: {'tools': [{'tool': 'lookup_orders',
+            'document_ids': [identity], 'order_ids': orders}]})
+    assert result['tools'][0]['result']['total'] == len(orders)
+    assert result['tools'][0]['result']['unmatched_order_ids'] == []
+    assert len(result['evidence']) == len(orders)
+    assert all(e['source']['price'] == '12.50' for e in result['evidence'])
+    assert result['unresolved'] == []

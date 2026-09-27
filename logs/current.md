@@ -1,19 +1,17 @@
-# 当前交接：M5.0 A+B首次评估已完成，发现阻断候选待决策
+# 当前交接：M5.0首次A+B完成；P-041句号缺陷本地修复完成
 
-2026-09-27。先读AGENTS.md、本文、eval/results/m50/run-20260927-ab-01/report.md、eval/README.md、logs/m5.md。协议docs/m50-evaluation-protocol.md、题集eval/cases/m50_protocol.json；P-040批准A+B，C未批准。
+2026-09-27。先读AGENTS.md、本文、logs/m5.md、eval/README.md。协议docs/m50-evaluation-protocol.md；P-040批准A+B，C未批准。P-041仅批准订单号句末句号校验最小修复和本地回归。
 
-版本：产品冻结7811243937e67e4e4d02854ffc616ad69736204d；交接6c6d922；正式评估基准提交859447f9b42e999cc07c603c6a88634b5c1d9984。本轮结果、离线汇总/复现说明与本摘要待本轮结果提交（以git log实查）；未推送。backend/app和依赖锁仍与7811243一致。
+Git：main，原产品冻结7811243、交接6c6d922；评估提交859447f、结果提交c5421f2。当前P-041修复检查点以git log核对提交，未推送。生产仅backend/app/questions.py一处正则边界改变，其他冻结范围保留；本检查点不是M5最终冻结/交付验收。
 
-A+B结果目录eval/results/m50/run-20260927-ab-01，真实运行260.922秒，共33attempt（Gemini11、文档embedding8、query7、rerank7）；无人工重试/切模型，C零调用。严格通过3/12，必要事实及其支持引用10/40。PDF证据单元词法9/12、向量12/12、RRF10/12、重排11/12；完整题6/7、7/7、6/7、6/7。不把小集结果升级为通用模型/策略结论。
+首次结果eval/results/m50/run-20260927-ab-01保持不变：严格3/12、必要事实及支持引用10/40；7题PDF词法9/12、向量12/12、RRF10/12、重排11/12。纯文本7单元分别4/7、7/7、5/7、6/7；表格PDF5单元各5/5。小样本且同文档相关，不能外推策略优劣。E01遗漏已有证据限定；E02遗漏+错误归属；E03/E06约60秒provider_unavailable，原因未确定；E04/E05依赖阻断。CSV正例未成功到查询，不是索引查错。E11直接回答正确但漏rubric枚举。
 
-失败：E01漏已提供的付款限定；E02检索遗漏+onlyfy错误归属/否认。E03/E06约60秒generation_provider_unavailable，远端原因未确定；E04/E05依赖未执行。E07/E12订单号句末句号被字面校验拒绝，模型订单正确；独立零外发QuestionTools复现'.'失败，'?'、','或无标点成功2条。E11直接回答正确，但缺预批rubric中白/黑/银完整枚举，严格失败单独说明。源码未修、原问题未改、旧成绩保留。
+P-041：E07/E12正确订单因句末点被拒已修，内部点/斜杠/连字符及字面完整性保留。4新正例先失败；QuestionTools 24通过；后端全量345通过71.79秒；diff --check通过。收据eval/results/m50/period-validation-fix.md。固定本地planner+真实CSV发布/查询的合成数据回归，不是模型/原目录真实复测。旧punctuation-repro及脚本保留，需原859447f checkout。
 
-待决策：按P-039讨论仅修复QuestionTools订单号句末标点边界（保持内部标点/精确匹配防截断），受控回归后重新冻结；受影响真实复测需要新范围/预算授权，E12已用于诊断须称回归材料。C仍等待用户时间决定。不能拿本次153上限未用完的余量自行重跑、加题或执行C。USD2为本次估算控制；已占用保守reserve USD0.22363244，已知成功usage按牌价USD0.01861124，失败计费用量未知，不是实付。
+真实A+B已用33attempt/260.922秒；reserve USD0.22363244，成功usage牌价USD0.01861124，失败计费未知。本次修复零外发。不得使用旧153上限余量自行复测；新基准/协议/预算先批准。C仍待决定。E07/E12已见，后续称回归；新未见材料另定。原runner冻结检查会拒绝当前产品差异，不绕过。
 
-成果：report.html（离线可筛选/展开）/report.md、summary.json/CSV、scores.jsonl、人工标准对应的assistant_source_review review.json及全部安全原始JSONL。离线python eval/summarize_m50.py <run-dir>重算无需Key，结果逐字节一致。语义判断不是独立人工双盲/全自动裁判。eval/README.md给出真实重跑与材料哈希/自有Key要求；eval/reproduce_m50_boundary.py可零外发复现句号问题。
+输出HTML/Markdown报告、JSON/CSV汇总、评分和原始JSONL。离线summarize无需Key，仅复算已有review。真实重跑需要原提交、材料哈希、自有Key/额度。原报告浏览器检查、密钥扫描及离线字节一致验证通过。M5按README独立空runtime重建/Docker浏览器演示未执行。
 
-验证：4项预算边界测试通过；脚本编译；报告Edge/Playwright桌面/手机、筛选/展开通过、无页面错误/整体溢出；密钥扫描通过。未跑产品全量测试，因为产品无改动；冻结351+10、浏览器35通过/11跳过沿用M4.6收据。本次不等于M5 Docker/浏览器独立空runtime交付验收。
+运行：原siteco-m28-smoke本轮未触碰/重启；原端口18095/18094状态沿用上轮，未重新探测。评估进程及临时18096服务上轮已结束。SQLite只由所属进程访问。根目录Gemini_API_KEY.txt/grok.txt/voyage.txt及.env ignored，禁止打印提交；本轮未读取。Python backend/.venv/Scripts/python.exe；普通shell沙箱helper失败时require_escalated。
 
-运行：原siteco-m28-smoke未改，18095/18094与4ready保持；本轮独立eval进程已结束、tmp/m50-ab-01/runtime保留，不是共享生产库；本地报告临时18096服务已停止。截图/准备页图在tmp/m50。M5重建仍需新空runtime与新外发授权。
-
-凭据Gemini_API_KEY.txt、grok.txt、voyage.txt、.env ignored，禁止打印或提交。本轮只读取Gemini/Voyage用于已批准调用；Groq未读未调用。运行SQLite只由所属进程访问。Python backend/.venv/Scripts/python.exe；Node D:/nodejs/node.exe；普通shell沙箱启动失败时require_escalated。无需重复请求已批准A+B的权限，但修复后复测/C不在授权中。
+下一步：用户决定纯文本证据覆盖/回答完整性改进范围与受影响真实复测预算；不自动更换检索策略。完成M5冻结前需按AGENTS固定范围双轴审查及独立重建验收。

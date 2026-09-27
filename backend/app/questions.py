@@ -105,7 +105,7 @@ class QuestionTools:
             routes.add(tool.tool)
             if isinstance(tool, CsvLookup):
                 for order in tool.order_ids:
-                    if not re.search(r'(?<![\w./-])' + re.escape(order) + r'(?![\w./-])', request.question):
+                    if not re.search(r'(?<![\w./-])' + re.escape(order) + r'(?![\w/-]|\.[\w./-])', request.question):
                         raise DocumentError('invalid_tool_plan', 'Order IDs must be explicit in the question.', 422)
         result = {**question, 'stage': 'evidence_prepared', 'tools': [], 'evidence': [],
                   'warnings': [{'document_id': identity, **warning}

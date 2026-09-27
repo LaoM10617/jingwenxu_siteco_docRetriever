@@ -16,7 +16,7 @@ python eval/summarize_m50.py eval/results/m50/run-20260927-ab-01
 
 This command reuses reviewed judgments; it does not independently re-grade language. For another live run, prepare a new `review.json` by checking each answer and evidence unit against the frozen rubric, then compute summaries. The current narrative report template documents this first run's findings; adapting a future run's narrative must not copy these findings without verification. Raw live execution is automated; semantic review remains an explicit review step.
 
-Reproduce the sentence-final-period defect locally with the original CSV and a new runtime (no keys/network):
+Reproduce the sentence-final-period defect at commit `859447f9b42e999cc07c603c6a88634b5c1d9984` with the original CSV and a new runtime (no keys/network). Current code includes the P-041 fix, so the historical reproduction script must be run in a checkout of that original commit. To verify the fix on current code, run `python -m pytest backend/tests/test_questions.py -q`:
 
 ```sh
 python eval/reproduce_m50_boundary.py --runtime tmp/m50-boundary-check/runtime
