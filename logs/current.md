@@ -1,4 +1,4 @@
-# 当前交接：M5.0首次A+B完成；P-041句号缺陷本地修复完成
+# 当前交接：M5交付候选已整理；干净Docker无密钥准备完成
 
 2026-09-27。先读AGENTS.md、本文、logs/m5.md、eval/README.md。协议docs/m50-evaluation-protocol.md；P-040批准A+B，C未批准。P-041仅批准订单号句末句号校验最小修复和本地回归。
 
@@ -15,3 +15,10 @@ P-041：E07/E12正确订单因句末点被拒已修，内部点/斜杠/连字符
 运行：原siteco-m28-smoke本轮未触碰/重启；原端口18095/18094状态沿用上轮，未重新探测。评估进程及临时18096服务上轮已结束。SQLite只由所属进程访问。根目录Gemini_API_KEY.txt/grok.txt/voyage.txt及.env ignored，禁止打印提交；本轮未读取。Python backend/.venv/Scripts/python.exe；普通shell沙箱helper失败时require_escalated。
 
 下一步：用户决定纯文本证据覆盖/回答完整性改进范围与受影响真实复测预算；不自动更换检索策略。完成M5冻结前需按AGENTS固定范围双轴审查及独立重建验收。
+
+
+最新M5准备（P-042）：用户批准先交付整理+干净端到端验收。已核对原case第2–4页：GitHub完整历史、Docker+环境/Key说明、README和本机live demo；不要求hosting/镜像仓库/ZIP。docs/delivery.md英文交付指南和docs/m5-clean-acceptance.md具体live提案已提交3f87595，README正式评估状态更新。源码候选ZIP tmp/m5-delivery/source-3f87595.zip来自git archive，不含历史；实际GitHub仍PRIVATE/remote main6c6d922，仅owner协作者，未推送/邀请。
+
+从提交导出的tmp/m5-delivery/source构建独立siteco-m5-delivery成功，18105前端/18104后端、tmp/m5-delivery/runtime新空目录；显式acceptance.env在其父目录，所有Key空。tokenizer新下载校验，双服务healthy，GET docs=[]，Edge/Playwright空态+缺Key提示通过（无写请求），服务保持运行。原18095/18094也healthy且未改。403可达Git blob及源码包已知密钥零命中，排除项通过；收据eval/results/m5_delivery_preparation.md。尚未上传/调用供应商。
+
+接下来等待docs/m5-clean-acceptance.md的9轮、总64attempt（文档24/query8/生成32）、USD2估算控制新授权。不是授权使用旧评估余量。可先核对新环境UI；正式live通过后仍需最终双轴审查、确定交付commit、推送、确认面试官访问。当前不是M5最终完成。当前文档收据提交以git log实查；不要把历史版本行误当最新HEAD。
