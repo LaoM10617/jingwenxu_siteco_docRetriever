@@ -574,3 +574,11 @@ M4.5.2只读核对完成，见docs/m452-voyage-embedding-assessment.md。建议�
 2026-09-27，按用户要求执行M4.6。原case必做功能及P-031–038已选范围核对完成，双轴同一快照审查发现的一处Settings本地限流误报已修复复核，无未处理冻结阻断。完整范围、参数、依赖、实际证据与已知限制见docs/m46-feature-freeze.md；审查收据eval/results/m46_review.md。建立包含检查点的本地冻结提交，本轮不push。
 
 后续先M5.0固定题集/人工标准/调用授权后正式量化evaluation，再M5独立空runtime重建和演示。不得用开发题或M4.5不同Top K/缓存耗时替代公平评估。冻结后只做已记录的阻断修复，保留旧结果并重新冻结/复验受影响范围；不自动扩Embedding、OCR、任意模型端点或长期会话。此功能冻结不等于交付邮件后的最终代码冻结。
+
+## P-040：M5.0协议A+B与本轮外发批准
+
+2026-09-27，用户明确批准docs/m50-evaluation-protocol.md协议A+B，并授权开始evaluation；C需看执行时间，未批准、不调用Groq。允许从项目根目录Gemini_API_KEY.txt与voyage.txt读取凭据用于本次执行；grok.txt虽已提供位置，本轮不需要读取。
+
+批准v0.1的12轮题目、人工证据/评分分母、描述性结果及失败保留规则；A为Gemini端到端及词法/向量/RRF，B为7题同候选重排。外发上限A+B为153个attempt（Gemini32、文档embedding72、query42、rerank7），合计USD2估算预算控制；不启用付费、不升级账户、不自动充值，不含M5重建或人工重试。具体材料、供应商、输入界限、每题上限和停机规则以协议第6节为准。
+
+评估harness的受控供应商边界计数/止损检查属于已批准协议第8节，不新增产品HTTP或业务接口。代码/标准固定后在独立evaluation runtime执行，现有演示服务保持不变。结果提供JSONL原始与评分、JSON/CSV汇总、Markdown报告及本地量化展示，复现说明须区分离线结果复算和需独立Key/材料/额度的真实重跑。C继续待用户决定。
