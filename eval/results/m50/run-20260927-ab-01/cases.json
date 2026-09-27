@@ -1,0 +1,526 @@
+{
+  "status": "approved_A_B_C_not_authorized",
+  "protocol_version": "m50-v0.1",
+  "product_commit": "7811243937e67e4e4d02854ffc616ad69736204d",
+  "handoff_commit": "6c6d9222b414ac1747c094536fa784b0aa19a3a5",
+  "materials": {
+    "terms": {
+      "path": "data/Legal Documents/Allgemeine_Einkaufsbedingungen_Siteco-Gruppe_April_2025.pdf",
+      "sha256": "861a1c09f3eac9b85fbb4e430571a4279df9c4211b1d287eab1a0f669cb8cb59",
+      "pages": 4,
+      "split": "development"
+    },
+    "rondel": {
+      "path": "data/Brochures/Indoor Lightening/SITECO_Rondel_21_Product_Flyer.pdf",
+      "sha256": "78a20a04658b46ad947eccce4d96e08f757f348e721b0d8159e5f9f1b7bff561",
+      "pages": 2,
+      "split": "development"
+    },
+    "prices": {
+      "path": "data/Price Lists/leuchten_siteco_LPR_2026_06.csv",
+      "sha256": "b58bcea0e2d5c1e9f0017a25d3f1153bf75c25c0e78dd02a9a711ceb699483b9",
+      "data_records": 11386,
+      "split": "shared_file",
+      "development_records": [
+        1,
+        2
+      ],
+      "holdout_records": [
+        11385,
+        11386
+      ]
+    },
+    "lunis_holdout": {
+      "path": "data/Brochures/Indoor Lightening/SIT_Teaser_Flyer_Lunis_R_V_25-486_RZ_WEB_EN.pdf",
+      "sha256": "f94f484feee79dd5eeea8cf58a622441e8c33ddea0a4e4d27c2c09f898d2e6f4",
+      "pages": 4,
+      "split": "holdout"
+    },
+    "privacy": {
+      "path": "data/Legal Documents/SITECO_Datenschutzerklaerung.pdf",
+      "sha256": "41fcdc6fb9632f52cd667ed7e14ac4910135cd94e3204553e5c97b16c6e4b7ac"
+    }
+  },
+  "cases": [
+    {
+      "id": "E01",
+      "origin": "P01",
+      "split": "development",
+      "question": "Reicht nach den Einkaufsbedingungen der Eingang einer Rechnung aus, damit die Zahlungsfrist läuft? Welche Voraussetzungen und Zahlungsoptionen nennt der Text?",
+      "allowed_documents": [
+        "terms"
+      ],
+      "parent": null,
+      "required_facts": [
+        {
+          "id": "E01-F1",
+          "text": "仅收到发票不足以开始付款期限。"
+        },
+        {
+          "id": "E01-F2",
+          "text": "货物/服务必须完整履行。"
+        },
+        {
+          "id": "E01-F3",
+          "text": "货物/服务必须无缺陷。"
+        },
+        {
+          "id": "E01-F4",
+          "text": "必须收到可审核发票。"
+        },
+        {
+          "id": "E01-F5",
+          "text": "14个日历日内付款可扣2%折扣，或60个日历日净额付款。"
+        },
+        {
+          "id": "E01-F6",
+          "text": "抵销或因缺陷适当扣留/减少付款时仍允许折扣。"
+        },
+        {
+          "id": "E01-F7",
+          "text": "缺陷情形的期限从完全消除缺陷或声明减价后开始。"
+        }
+      ],
+      "pdf_evidence_units": [
+        {
+          "id": "E01-U1",
+          "document": "terms",
+          "page": 2,
+          "anchor": "Artikel VII.2: Zahlungen erfolgen"
+        },
+        {
+          "id": "E01-U2",
+          "document": "terms",
+          "page": 2,
+          "anchor": "Artikel VII.3: Die Zahlungsfrist beginnt"
+        }
+      ],
+      "expected_behavior": "answer",
+      "csv_expected_records": null,
+      "csv_order_ids": null,
+      "application_result": "not_run"
+    },
+    {
+      "id": "E02",
+      "origin": "P03",
+      "split": "development",
+      "question": "Welche Aufbewahrungs- beziehungsweise Löschfristen nennt die Datenschutzerklärung für abgelehnte Bewerbungen und für das Karriereportal onlyfy? Bitte die beiden Abschnitte und ihre Einschränkungen getrennt wiedergeben, nicht zu einer einheitlichen Frist zusammenziehen.",
+      "allowed_documents": [
+        "privacy"
+      ],
+      "parent": null,
+      "required_facts": [
+        {
+          "id": "E02-F1",
+          "text": "一般申请管理章节：未订立雇佣合同的申请材料。"
+        },
+        {
+          "id": "E02-F2",
+          "text": "该章节从拒绝通知起两个月后自动删除。"
+        },
+        {
+          "id": "E02-F3",
+          "text": "保留其他合法利益例外，例如AGG程序中的举证义务。"
+        },
+        {
+          "id": "E02-F4",
+          "text": "独立onlyfy章节写最长六个月，而非固定六个月或拒绝起六个月。"
+        },
+        {
+          "id": "E02-F5",
+          "text": "明确两项期限各自章节归属，不合并或推断优先适用关系。"
+        }
+      ],
+      "pdf_evidence_units": [
+        {
+          "id": "E02-U1",
+          "document": "privacy",
+          "page": 5,
+          "anchor": "7.3 Bewerbungsmanagement / Stellenbörse"
+        },
+        {
+          "id": "E02-U2",
+          "document": "privacy",
+          "page": 6,
+          "anchor": "zwei Monate nach Bekanntgabe der Absageentscheidung"
+        },
+        {
+          "id": "E02-U3",
+          "document": "privacy",
+          "page": 10,
+          "anchor": "11.2 Onlyfy / Karriere-Portal der New Work SE"
+        },
+        {
+          "id": "E02-U4",
+          "document": "privacy",
+          "page": 11,
+          "anchor": "Die Daten werden bis zu 6 Monate aufbewahrt"
+        }
+      ],
+      "expected_behavior": "answer",
+      "csv_expected_records": null,
+      "csv_order_ids": null,
+      "application_result": "not_run"
+    },
+    {
+      "id": "E03",
+      "origin": "M41-04",
+      "split": "development",
+      "question": "Compare Rondel order numbers 0MD5307L1830 and 0MD5307L0940.",
+      "allowed_documents": [
+        "rondel"
+      ],
+      "parent": null,
+      "required_facts": [
+        {
+          "id": "E03-F1",
+          "text": "0MD5307L1830: 3000 K"
+        },
+        {
+          "id": "E03-F2",
+          "text": "0MD5307L1830: 1800 lm"
+        },
+        {
+          "id": "E03-F3",
+          "text": "0MD5307L1830: 18 W"
+        },
+        {
+          "id": "E03-F4",
+          "text": "0MD5307L1830: ON/OFF"
+        },
+        {
+          "id": "E03-F5",
+          "text": "0MD5307L1830: 1.6 kg"
+        },
+        {
+          "id": "E03-F6",
+          "text": "0MD5307L0940: 4000 K"
+        },
+        {
+          "id": "E03-F7",
+          "text": "0MD5307L0940: 900 lm"
+        },
+        {
+          "id": "E03-F8",
+          "text": "0MD5307L0940: 9 W"
+        },
+        {
+          "id": "E03-F9",
+          "text": "0MD5307L0940: ON/OFF"
+        },
+        {
+          "id": "E03-F10",
+          "text": "0MD5307L0940: 1.6 kg"
+        }
+      ],
+      "pdf_evidence_units": [
+        {
+          "id": "E03-U1",
+          "document": "rondel",
+          "page": 2,
+          "anchor": "Rondel 21 order variants: 0MD5307L1830 row + column headings"
+        },
+        {
+          "id": "E03-U2",
+          "document": "rondel",
+          "page": 2,
+          "anchor": "Rondel 21 order variants: 0MD5307L0940 row + column headings"
+        }
+      ],
+      "expected_behavior": "answer",
+      "csv_expected_records": null,
+      "csv_order_ids": null,
+      "application_result": "not_run"
+    },
+    {
+      "id": "E04",
+      "origin": "M41-05",
+      "split": "development",
+      "question": "What are the colour temperature and power of the second luminaire?",
+      "allowed_documents": [
+        "rondel"
+      ],
+      "parent": "E03",
+      "required_facts": [
+        {
+          "id": "E04-F1",
+          "text": "0MD5307L0940: 4000 K"
+        },
+        {
+          "id": "E04-F2",
+          "text": "0MD5307L0940: 9 W"
+        }
+      ],
+      "pdf_evidence_units": [
+        {
+          "id": "E04-U1",
+          "document": "rondel",
+          "page": 2,
+          "anchor": "Rondel 21 order variants: 0MD5307L0940 row + column headings"
+        }
+      ],
+      "expected_behavior": "answer",
+      "csv_expected_records": null,
+      "csv_order_ids": null,
+      "application_result": "not_run"
+    },
+    {
+      "id": "E05",
+      "origin": "M41-06",
+      "split": "development",
+      "question": "What is its power? Use only the currently selected price list; if it does not provide this, say so.",
+      "allowed_documents": [
+        "prices"
+      ],
+      "parent": "E04",
+      "required_facts": [],
+      "pdf_evidence_units": [],
+      "expected_behavior": "exact_not_found_no_power",
+      "csv_expected_records": [],
+      "csv_order_ids": [
+        "0MD5307L0940"
+      ],
+      "application_result": "not_run"
+    },
+    {
+      "id": "E06",
+      "origin": "D09",
+      "split": "development",
+      "question": "Welchen Listenpreis und welches Gültigkeitsdatum hat 51DB11EC11B1D?",
+      "allowed_documents": [
+        "prices"
+      ],
+      "parent": null,
+      "required_facts": [
+        {
+          "id": "E06-F1",
+          "text": "51DB11EC11B1D: Listenpreis 183,20"
+        },
+        {
+          "id": "E06-F2",
+          "text": "51DB11EC11B1D: gültig ab 01.06.2026"
+        }
+      ],
+      "pdf_evidence_units": [],
+      "expected_behavior": "answer",
+      "csv_expected_records": [
+        1
+      ],
+      "csv_order_ids": [
+        "51DB11EC11B1D"
+      ],
+      "application_result": "not_run"
+    },
+    {
+      "id": "E07",
+      "origin": "D10",
+      "split": "development",
+      "question": "Vergleiche Preis und EAN von 51DB11EC11B1D und 51DB11EC11D1D.",
+      "allowed_documents": [
+        "prices"
+      ],
+      "parent": null,
+      "required_facts": [
+        {
+          "id": "E07-F1",
+          "text": "51DB11EC11B1D: Listenpreis 183,20"
+        },
+        {
+          "id": "E07-F2",
+          "text": "51DB11EC11D1D: Listenpreis 183,20"
+        },
+        {
+          "id": "E07-F3",
+          "text": "51DB11EC11B1D: EAN 4069025783196"
+        },
+        {
+          "id": "E07-F4",
+          "text": "51DB11EC11D1D: EAN 4069025783219"
+        }
+      ],
+      "pdf_evidence_units": [],
+      "expected_behavior": "answer",
+      "csv_expected_records": [
+        1,
+        2
+      ],
+      "csv_order_ids": [
+        "51DB11EC11B1D",
+        "51DB11EC11D1D"
+      ],
+      "application_result": "not_run"
+    },
+    {
+      "id": "E08",
+      "origin": "D11",
+      "split": "development",
+      "question": "What is the exact price of NOT-A-SITECO-ORDER-000?",
+      "allowed_documents": [
+        "prices"
+      ],
+      "parent": null,
+      "required_facts": [],
+      "pdf_evidence_units": [],
+      "expected_behavior": "exact_not_found",
+      "csv_expected_records": [],
+      "csv_order_ids": [
+        "NOT-A-SITECO-ORDER-000"
+      ],
+      "application_result": "not_run"
+    },
+    {
+      "id": "E09",
+      "origin": "M41-07",
+      "split": "development",
+      "question": "Welche Incoterms-Fassung ist maßgeblich, und welchen Listenpreis hat 51DB11EC11B1D-NOT-FOUND? Bitte getrennt beantworten.",
+      "allowed_documents": [
+        "terms",
+        "prices"
+      ],
+      "parent": null,
+      "required_facts": [
+        {
+          "id": "E09-F1",
+          "text": "Incoterms 2020"
+        }
+      ],
+      "pdf_evidence_units": [
+        {
+          "id": "E09-U1",
+          "document": "terms",
+          "page": 1,
+          "anchor": "Artikel II.3: Für Incoterms ist der Stand von 2020 maßgeblich"
+        }
+      ],
+      "expected_behavior": "partial_answer_exact_miss",
+      "csv_expected_records": [],
+      "csv_order_ids": [
+        "51DB11EC11B1D-NOT-FOUND"
+      ],
+      "application_result": "not_run"
+    },
+    {
+      "id": "E10",
+      "origin": "H01",
+      "split": "holdout_document",
+      "question": "What are the Lunis R diameter, weight and luminous flux range?",
+      "allowed_documents": [
+        "lunis_holdout"
+      ],
+      "parent": null,
+      "required_facts": [
+        {
+          "id": "E10-F1",
+          "text": "直径380 mm"
+        },
+        {
+          "id": "E10-F2",
+          "text": "重量2 kg"
+        },
+        {
+          "id": "E10-F3",
+          "text": "光通量范围2020–4800 lm"
+        }
+      ],
+      "pdf_evidence_units": [
+        {
+          "id": "E10-U1",
+          "document": "lunis_holdout",
+          "page": 4,
+          "anchor": "Technical data: Diameter / Weight / Luminous flux"
+        }
+      ],
+      "expected_behavior": "answer",
+      "csv_expected_records": null,
+      "csv_order_ids": null,
+      "application_result": "not_run"
+    },
+    {
+      "id": "E11",
+      "origin": "H02",
+      "split": "holdout_document",
+      "question": "Is recessed Lunis R offered in every listed housing colour?",
+      "allowed_documents": [
+        "lunis_holdout"
+      ],
+      "parent": null,
+      "required_facts": [
+        {
+          "id": "E11-F1",
+          "text": "外壳总体列有白、黑、银色。"
+        },
+        {
+          "id": "E11-F2",
+          "text": "嵌入式仅银色，因此不是所有列出颜色均适用。"
+        }
+      ],
+      "pdf_evidence_units": [
+        {
+          "id": "E11-U1",
+          "document": "lunis_holdout",
+          "page": 4,
+          "anchor": "Technical data: Housing (recessed only silver)"
+        }
+      ],
+      "expected_behavior": "answer",
+      "csv_expected_records": null,
+      "csv_order_ids": null,
+      "application_result": "not_run"
+    },
+    {
+      "id": "E12",
+      "origin": "H03",
+      "split": "holdout_same_file",
+      "question": "Vergleiche die Listenpreise und Gültigkeitsdaten von B01S6B4A07145E und B01S7B4A07150E.",
+      "allowed_documents": [
+        "prices"
+      ],
+      "parent": null,
+      "required_facts": [
+        {
+          "id": "E12-F1",
+          "text": "B01S6B4A07145E: Listenpreis 2075.10"
+        },
+        {
+          "id": "E12-F2",
+          "text": "B01S7B4A07150E: Listenpreis 2513.30"
+        },
+        {
+          "id": "E12-F3",
+          "text": "B01S6B4A07145E: gültig ab 01.06.2026"
+        },
+        {
+          "id": "E12-F4",
+          "text": "B01S7B4A07150E: gültig ab 01.06.2026"
+        }
+      ],
+      "pdf_evidence_units": [],
+      "expected_behavior": "answer",
+      "csv_expected_records": [
+        11385,
+        11386
+      ],
+      "csv_order_ids": [
+        "B01S6B4A07145E",
+        "B01S7B4A07150E"
+      ],
+      "application_result": "not_run",
+      "question_note": "明确询问原H03标准已包含的日期；未新增材料或答案事实。"
+    }
+  ],
+  "denominators": {
+    "turns": 12,
+    "development_turns": 9,
+    "holdout_document_turns": 2,
+    "holdout_same_file_turns": 1,
+    "pdf_positive_turns": 7,
+    "pdf_evidence_units": 12,
+    "required_answer_facts": 40,
+    "development_answer_facts": 31,
+    "holdout_answer_facts": 9,
+    "csv_positive_turns": 3,
+    "csv_positive_record_occurrences": 5,
+    "csv_absence_turns": 3,
+    "followup_turns": 2
+  }
+}

@@ -1,0 +1,304 @@
+{
+  "run_id": "run-20260927-ab-01",
+  "product_commit": "7811243937e67e4e4d02854ffc616ad69736204d",
+  "evaluation_commit": "859447f9b42e999cc07c603c6a88634b5c1d9984",
+  "run_status": "completed",
+  "counts": {
+    "generation": 11,
+    "document": 8,
+    "query": 7,
+    "rerank": 7
+  },
+  "total_attempts": 33,
+  "elapsed_seconds": 260.921905,
+  "reserved_cost_usd": 0.22363243999999993,
+  "actual_invoice_usd": null,
+  "retrieval": {
+    "all": {
+      "lexical": {
+        "questions": 7,
+        "units_required": 12,
+        "units_hit": 9,
+        "macro_recall": 0.8928571428571429,
+        "micro_recall": 0.75,
+        "complete_questions": 6,
+        "mrr": 0.8928571428571429,
+        "context_units_hit": 9,
+        "context_complete_questions": 6
+      },
+      "vector": {
+        "questions": 7,
+        "units_required": 12,
+        "units_hit": 12,
+        "macro_recall": 1.0,
+        "micro_recall": 1.0,
+        "complete_questions": 7,
+        "mrr": 1.0,
+        "context_units_hit": 12,
+        "context_complete_questions": 7
+      },
+      "rrf": {
+        "questions": 7,
+        "units_required": 12,
+        "units_hit": 10,
+        "macro_recall": 0.9285714285714286,
+        "micro_recall": 0.8333333333333334,
+        "complete_questions": 6,
+        "mrr": 1.0,
+        "context_units_hit": 10,
+        "context_complete_questions": 6
+      },
+      "rerank": {
+        "questions": 7,
+        "units_required": 12,
+        "units_hit": 11,
+        "macro_recall": 0.9642857142857143,
+        "micro_recall": 0.9166666666666666,
+        "complete_questions": 6,
+        "mrr": 1.0,
+        "context_units_hit": 11,
+        "context_complete_questions": 6
+      }
+    },
+    "development": {
+      "lexical": {
+        "questions": 5,
+        "units_required": 10,
+        "units_hit": 7,
+        "macro_recall": 0.85,
+        "micro_recall": 0.7,
+        "complete_questions": 4,
+        "mrr": 0.85,
+        "context_units_hit": 7,
+        "context_complete_questions": 4
+      },
+      "vector": {
+        "questions": 5,
+        "units_required": 10,
+        "units_hit": 10,
+        "macro_recall": 1.0,
+        "micro_recall": 1.0,
+        "complete_questions": 5,
+        "mrr": 1.0,
+        "context_units_hit": 10,
+        "context_complete_questions": 5
+      },
+      "rrf": {
+        "questions": 5,
+        "units_required": 10,
+        "units_hit": 8,
+        "macro_recall": 0.9,
+        "micro_recall": 0.8,
+        "complete_questions": 4,
+        "mrr": 1.0,
+        "context_units_hit": 8,
+        "context_complete_questions": 4
+      },
+      "rerank": {
+        "questions": 5,
+        "units_required": 10,
+        "units_hit": 9,
+        "macro_recall": 0.95,
+        "micro_recall": 0.9,
+        "complete_questions": 4,
+        "mrr": 1.0,
+        "context_units_hit": 9,
+        "context_complete_questions": 4
+      }
+    },
+    "holdout_document": {
+      "lexical": {
+        "questions": 2,
+        "units_required": 2,
+        "units_hit": 2,
+        "macro_recall": 1.0,
+        "micro_recall": 1.0,
+        "complete_questions": 2,
+        "mrr": 1.0,
+        "context_units_hit": 2,
+        "context_complete_questions": 2
+      },
+      "vector": {
+        "questions": 2,
+        "units_required": 2,
+        "units_hit": 2,
+        "macro_recall": 1.0,
+        "micro_recall": 1.0,
+        "complete_questions": 2,
+        "mrr": 1.0,
+        "context_units_hit": 2,
+        "context_complete_questions": 2
+      },
+      "rrf": {
+        "questions": 2,
+        "units_required": 2,
+        "units_hit": 2,
+        "macro_recall": 1.0,
+        "micro_recall": 1.0,
+        "complete_questions": 2,
+        "mrr": 1.0,
+        "context_units_hit": 2,
+        "context_complete_questions": 2
+      },
+      "rerank": {
+        "questions": 2,
+        "units_required": 2,
+        "units_hit": 2,
+        "macro_recall": 1.0,
+        "micro_recall": 1.0,
+        "complete_questions": 2,
+        "mrr": 1.0,
+        "context_units_hit": 2,
+        "context_complete_questions": 2
+      }
+    },
+    "holdout_same_file": {}
+  },
+  "answers": {
+    "all": {
+      "turns": 12,
+      "completed": 6,
+      "failed": 4,
+      "dependent_blocked": 2,
+      "strict_pass": 3,
+      "facts_correct": 10,
+      "facts_cited": 10,
+      "facts_required": 40,
+      "observed_turns": 10,
+      "median_seconds_including_failures": 2.48450000000048,
+      "completed_median_seconds": 2.48450000000048
+    },
+    "development": {
+      "turns": 9,
+      "completed": 4,
+      "failed": 3,
+      "dependent_blocked": 2,
+      "strict_pass": 2,
+      "facts_correct": 6,
+      "facts_cited": 6,
+      "facts_required": 31,
+      "observed_turns": 7,
+      "median_seconds_including_failures": 34.625,
+      "completed_median_seconds": 18.57799999999952
+    },
+    "holdout_document": {
+      "turns": 2,
+      "completed": 2,
+      "failed": 0,
+      "dependent_blocked": 0,
+      "strict_pass": 1,
+      "facts_correct": 4,
+      "facts_cited": 4,
+      "facts_required": 5,
+      "observed_turns": 2,
+      "median_seconds_including_failures": 2.29700000000048,
+      "completed_median_seconds": 2.29700000000048
+    },
+    "holdout_same_file": {
+      "turns": 1,
+      "completed": 0,
+      "failed": 1,
+      "dependent_blocked": 0,
+      "strict_pass": 0,
+      "facts_correct": 0,
+      "facts_cited": 0,
+      "facts_required": 4,
+      "observed_turns": 1,
+      "median_seconds_including_failures": 1.8130000000019209,
+      "completed_median_seconds": null
+    }
+  },
+  "C": "not authorized; no Groq calls",
+  "limitations": [
+    "small correlated set",
+    "assistant source review, not independent human double review",
+    "provider aliases/default randomness",
+    "backend timing, not browser latency"
+  ],
+  "csv": {
+    "positive_cases": [
+      {
+        "case": "E06",
+        "status": "lookup_not_observed",
+        "expected_count": 1,
+        "returned_count": 0,
+        "hits": 0,
+        "precision": 0,
+        "recall": 0.0
+      },
+      {
+        "case": "E07",
+        "status": "lookup_not_observed",
+        "expected_count": 2,
+        "returned_count": 0,
+        "hits": 0,
+        "precision": 0,
+        "recall": 0.0
+      },
+      {
+        "case": "E12",
+        "status": "lookup_not_observed",
+        "expected_count": 2,
+        "returned_count": 0,
+        "hits": 0,
+        "precision": 0,
+        "recall": 0.0
+      }
+    ],
+    "positive_macro_precision": 0,
+    "positive_macro_recall": 0.0,
+    "positive_micro_precision": null,
+    "positive_micro_recall_numerator": 0,
+    "positive_micro_recall_denominator": 5,
+    "micro_precision_note": "No returned records means undefined denominator; failures remain in macro metrics. Positive sets use recorded pre-answer evidence context; report pagination/omission if present.",
+    "exact_miss_correct": 2,
+    "exact_miss_total": 3,
+    "exact_miss_executed": 2,
+    "duplicate_source_preservation": null
+  },
+  "citation_support": {
+    "supported_pairs": 16,
+    "total_pairs": 17,
+    "uncited_false_claims": [
+      {
+        "case": "E02",
+        "location": "gaps[0]",
+        "reason": "False denial that onlyfy has a specific retention statement; page 10 heading and page 11 up-to-six-month statement exist and were in actual context."
+      }
+    ]
+  },
+  "followups": {
+    "correct_reference": 0,
+    "scope_pass": 0,
+    "fixed_denominator": 2,
+    "executed": 0,
+    "reason": "Dependent on failed E03; not an observed model reference error."
+  },
+  "usage": {
+    "gemini_successful_responses_with_usage": 9,
+    "gemini_input_tokens": 45926,
+    "gemini_output_and_thinking_tokens": 1272,
+    "embedding_tokens": 17414,
+    "rerank_tokens": 30430,
+    "failed_generation_usage_unknown": 2,
+    "known_usage_list_price_usd": 0.018611239999999998,
+    "note": "Known successful usage at protocol list prices, excludes unknown failed-call billing; not invoice."
+  },
+  "rerank": {
+    "successful": 7,
+    "planned": 7,
+    "median_provider_seconds": 0.531
+  },
+  "artifact_hashes": {
+    "answers.jsonl": "2b28930b951e60049e91d00e39b8ad15d3764afe239c6fb07bb6aee8712454f0",
+    "attempts.jsonl": "8b96ebce0a48b3925511fe80e6e5274293d3273a12b070c0d9e0a5721d49f92c",
+    "cases.json": "08bfdd60676842a2d3aa041e94d5861a4ea642a4f4f7fe3f9b923e8186d5df46",
+    "generation.jsonl": "8e8d0363fbb49f7273340360f66a6d4cfe7171bfcdd79a6fa903f0af79467614",
+    "ingestion.jsonl": "7593399ac9527b9b80c0d11df45c4edefcefc70d7deb1b8dc2f43c8635cd6f4c",
+    "manifest.json": "befb99ed06460f75ca776cd10d96aa654f350b0f693cee72afd31f235ec821ca",
+    "protocol.md": "6303c0e9687cf830046190860fd901a18cc01967e1df18973dd5b41ec3e19b45",
+    "retrieval.jsonl": "a9400631eeb3d8054471d0effea887a75194f050e2e2e6a77e5f6ff3adf0b13e",
+    "review.json": "e6ddddd6f26f4cf6e76661316f1f8d03d7dc4fed1c7368e5a8da1f840c932939",
+    "scores.jsonl": "42df8eb754ea6010b194ace3661bec033c7bb5e5bf76d6e8776e928edfc52e1c"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "offline_regeneration_identical": true,
+  "credential_scan": "passed; values not logged",
+  "budget_tests": "4 passed",
+  "report_browser_check": {
+    "engine": "local Edge via Playwright",
+    "case_rows": 12,
+    "filter": "passed",
+    "details": "passed",
+    "mobile_overflow": false,
+    "page_errors": 0
+  },
+  "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "packages": {
+    "pdfplumber": "0.11.10",
+    "faiss-cpu": "1.15.1",
+    "voyageai": "0.5.0",
+    "google-genai": "2.25.0",
+    "pydantic": "2.13.5",
+    "fastapi": "0.141.1"
+  },
+  "source_product_diff": "backend/app and backend/requirements.lock.txt unchanged from 7811243",
+  "no_provider_calls_in_scoring": true,
+  "C": "not run"
+}

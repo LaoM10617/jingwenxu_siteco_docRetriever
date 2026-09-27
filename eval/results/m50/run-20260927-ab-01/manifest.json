@@ -1,0 +1,113 @@
+{
+  "status": "completed",
+  "started_utc": "2026-09-27T13:49:01.164157+00:00",
+  "product_commit": "7811243937e67e4e4d02854ffc616ad69736204d",
+  "head": "859447f9b42e999cc07c603c6a88634b5c1d9984",
+  "runner_sha256": "23475001937c279a7e453d53f92522c2c62eb199a38f3dd8698c63b62ef99a53",
+  "case_sha256": "08bfdd60676842a2d3aa041e94d5861a4ea642a4f4f7fe3f9b923e8186d5df46",
+  "protocol_sha256": "6303c0e9687cf830046190860fd901a18cc01967e1df18973dd5b41ec3e19b45",
+  "preparation": {
+    "terms": {
+      "pages": 4,
+      "chunks": 29,
+      "batches": 3,
+      "tokens": 8001,
+      "coverage": {
+        "extracted": 4,
+        "degraded": 0,
+        "no_text": 0,
+        "failed": 0
+      }
+    },
+    "rondel": {
+      "pages": 2,
+      "chunks": 17,
+      "batches": 1,
+      "tokens": 1325,
+      "coverage": {
+        "extracted": 1,
+        "degraded": 1,
+        "no_text": 0,
+        "failed": 0
+      }
+    },
+    "prices": {
+      "records": 11386
+    },
+    "lunis_holdout": {
+      "pages": 4,
+      "chunks": 23,
+      "batches": 1,
+      "tokens": 1066,
+      "coverage": {
+        "extracted": 2,
+        "degraded": 2,
+        "no_text": 0,
+        "failed": 0
+      }
+    },
+    "privacy": {
+      "pages": 12,
+      "chunks": 29,
+      "batches": 3,
+      "tokens": 8955,
+      "coverage": {
+        "extracted": 11,
+        "degraded": 1,
+        "no_text": 0,
+        "failed": 0
+      }
+    }
+  },
+  "blocks": [
+    "A",
+    "B"
+  ],
+  "C": "not_authorized",
+  "config": {
+    "generation": "gemini-3.5-flash-lite",
+    "embedding": "voyage-4",
+    "dimensions": 1024,
+    "top_k": 8,
+    "rrf_k": 60,
+    "candidates_per_route": 20,
+    "evidence_chars": 28000,
+    "embedding_rpm": 60,
+    "embedding_tpm": 200000,
+    "embedding_min_interval": 1,
+    "rerank_min_interval": 1,
+    "reranker": "rerank-2.5-lite",
+    "rerank_budget_seconds": 5,
+    "generation_output_limit": 6000,
+    "temperature": "provider_default",
+    "seed": "not_set"
+  },
+  "prompt_hashes": {
+    "ANSWER": "f222a01de4a1ae99dd9b456e6641866f568a4e5acacc5a49a86606c52ddd6ae7",
+    "PLAN": "5269be9483e1095e2061cf91af3665451dce8dd5b1bd3a7e71edf60d21261a65",
+    "RESOLVE": "b3dba64f2a2d93bc1be974ee1df90b95682a8d19efc69e6d4ae251727514f5c1"
+  },
+  "measurement_scope": "frozen backend service/task chain; not HTTP/browser latency",
+  "runtime_reused": false,
+  "documents": {
+    "terms": "ca2c9d899cc94bd7add829e49da45500",
+    "rondel": "6d08874559924178a237a6d8f0b59ecd",
+    "prices": "f9c320a7d1cd422fb1cd64f722aa4fcd",
+    "lunis_holdout": "a5dd33937a6044859a95993459c47502",
+    "privacy": "0551740e8bb640c7b4b4bce8e57ddbd2"
+  },
+  "finished_utc": "2026-09-27T13:53:22.086062+00:00",
+  "counts": {
+    "generation": 11,
+    "document": 8,
+    "query": 7,
+    "rerank": 7
+  },
+  "logical_batches": {
+    "document": 8,
+    "query": 7
+  },
+  "reserved_cost_usd": 0.22363243999999993,
+  "actual_cost_usd": null,
+  "cost_note": "conservative reserve; not invoice; usage where available in generation/attempt logs"
+}

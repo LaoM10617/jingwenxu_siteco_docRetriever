@@ -1,0 +1,26 @@
+{
+  "provider_calls": 0,
+  "product_modified": false,
+  "results": [
+    {
+      "ending": ".",
+      "status": "failed",
+      "code": "invalid_tool_plan"
+    },
+    {
+      "ending": "?",
+      "status": "ok",
+      "total": 2
+    },
+    {
+      "ending": "",
+      "status": "ok",
+      "total": 2
+    },
+    {
+      "ending": ",",
+      "status": "ok",
+      "total": 2
+    }
+  ]
+}

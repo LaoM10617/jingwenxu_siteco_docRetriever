@@ -6,7 +6,21 @@ The frozen product is `7811243937e67e4e4d02854ffc616ad69736204d`. The runner ver
 
 Each result directory contains `cases.json`, `protocol.md`, `manifest.json`, `ingestion.jsonl`, `attempts.jsonl`, `generation.jsonl`, `retrieval.jsonl` and `answers.jsonl`. The JSONL files preserve requests/evidence/responses and failures; `attempts.jsonl` contains started and terminal events for the same attempt, so count terminal events or unique `(kind, attempt)`, not lines. Credentials and authorization headers are excluded.
 
-The reviewed `scores.jsonl` will contain per-fact and per-evidence judgments with reasons. `summary.json`, `summary.csv`, `report.md` and the local visual report are derived outputs. Inspect scores against the original documents: rerunning arithmetic is not independent verification of the annotations. The final result directory and offline summary command will be linked here after scoring.
+The reviewed `scores.jsonl` will contain per-fact and per-evidence judgments with reasons. `summary.json`, `summary.csv`, `report.md` and the local visual report are derived outputs. Inspect scores against the original documents: rerunning arithmetic is not independent verification of the annotations. First result: [run-20260927-ab-01/report.md](results/m50/run-20260927-ab-01/report.md), with [interactive offline report](results/m50/run-20260927-ab-01/report.html) and [summary CSV](results/m50/run-20260927-ab-01/summary.csv). Live runner/protocol commit: `859447f9b42e999cc07c603c6a88634b5c1d9984`; product unchanged from `7811243`. The scoring/report code is in the subsequent results commit.
+
+Recompute the published summaries, without any key or original PDF:
+
+```sh
+python eval/summarize_m50.py eval/results/m50/run-20260927-ab-01
+```
+
+This command reuses reviewed judgments; it does not independently re-grade language. For another live run, prepare a new `review.json` by checking each answer and evidence unit against the frozen rubric, then compute summaries. The current narrative report template documents this first run's findings; adapting a future run's narrative must not copy these findings without verification. Raw live execution is automated; semantic review remains an explicit review step.
+
+Reproduce the sentence-final-period defect locally with the original CSV and a new runtime (no keys/network):
+
+```sh
+python eval/reproduce_m50_boundary.py --runtime tmp/m50-boundary-check/runtime
+```
 
 ## Run A+B with your own credentials
 
