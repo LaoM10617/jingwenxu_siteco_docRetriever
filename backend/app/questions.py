@@ -133,6 +133,7 @@ class QuestionTools:
                 except DocumentError:
                     budget.check()
                     raise
+                result['warnings'].extend(output.get('warnings', []))
                 if not output['records']:
                     result['unresolved'].append({'code': 'insufficient_evidence', 'document_ids': ids})
             result['tools'].append({'tool': tool.tool, 'document_ids': ids, 'result': output})

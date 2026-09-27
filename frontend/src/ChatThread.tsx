@@ -86,7 +86,12 @@ export default function ChatThread({turns,retry,refresh}: {turns:Turn[];retry:(t
           <QuestionProgress turn={turn} />}
         {task?.status === 'failed' && <div role="alert" className="error"><p>{task.error?.message}</p>
           <p>Question failed ({task.error?.code}). You can submit a new question.</p></div>}
+        {task?.config_snapshot && <p className="muted">This task: {task.config_snapshot.generation.provider} / {task.config_snapshot.generation.model}; Top K {task.config_snapshot.retrieval.top_k}; rerank {task.config_snapshot.retrieval.rerank_enabled ? 'on' : 'off'}.</p>}
         {answer && <div className="model-answer"><h2>{outcomes[answer.outcome] || answer.outcome}</h2>
+          {answer.retrieval_diagnostics && <details className="warnings"><summary>PDF retrieval diagnostics</summary>
+            <p>{answer.retrieval_diagnostics.strategy}: {answer.retrieval_diagnostics.union_count} candidates; requested {answer.retrieval_diagnostics.requested_top_k}; selected {answer.retrieval_diagnostics.selected_count}; in context {answer.retrieval_diagnostics.context_included_count}; omitted {answer.retrieval_diagnostics.context_omitted_count}.</p>
+            {answer.retrieval_diagnostics.rerank && <p>Rerank: {answer.retrieval_diagnostics.rerank.status} {answer.retrieval_diagnostics.rerank.reason || ''} ({answer.retrieval_diagnostics.rerank.seconds} s)</p>}
+          </details>}
           {!!answer.memory?.references.length && <p className="muted">Subjects resolved from conversation: {answer.memory.references.map(r => r.term).join(', ')}. Sources checked in the current materials.</p>}
           {answer.outcome === 'needs_clarification' && <p>Include explicit order numbers or clarify what you want to find in the selected materials.</p>}
           {answer.outcome === 'exact_not_found' && <p>No exact record matched the requested order numbers in this scope.</p>}

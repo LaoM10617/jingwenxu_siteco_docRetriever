@@ -15,6 +15,9 @@ from app.documents import DocumentService, DocumentError
 from app.uploads import router
 from app.processing import DocumentProcessor
 from app.retrieval.pdf import PdfRetriever
+from app.reranking import configured_reranker
+from app.runtime_settings import MemorySettings, router as settings_router
+from app.runtime_bindings import RuntimeBindings
 from app.voyage import configured_gateway
 from app.questions import QuestionTools
 from app.answers import AnswerService
@@ -58,12 +61,14 @@ def create_app(settings: Settings | None = None, *, processor=None, model=None) 
             raise StartupError("SQLite startup check failed; check app.sqlite3, permissions and locks") from None
         try:
             app.state.documents = DocumentService(configuration.data_dir)
-            gateway = configured_gateway(configuration) if processor is None else getattr(processor, 'gateway', None)
-            app.state.retriever = PdfRetriever(app.state.documents, app.state.documents.lexical, gateway)
-            app.state.answers = AnswerService(QuestionTools(app.state.documents, app.state.retriever),
-                                             model if model is not None else StructuredModel(configuration))
-            await run_in_threadpool(app.state.documents.start, processor if processor is not None else DocumentProcessor(gateway))
-            app.state.questions = QuestionTasks(configuration.data_dir / 'app.sqlite3', app.state.answers)
+            bindings = RuntimeBindings(app.state.memory_settings, app.state.documents, processor=processor, model=model)
+            app.state.bindings = bindings
+            app.state.documents.processor_factory = bindings.processor
+            app.state.answers = bindings.answers()
+            app.state.retriever = app.state.answers.tools.retriever
+            await run_in_threadpool(app.state.documents.start, processor if processor is not None else DocumentProcessor())
+            app.state.questions = QuestionTasks(configuration.data_dir / 'app.sqlite3', app.state.answers,
+                                                answer_factory=bindings.answers)
         except (OSError, sqlite3.Error):
             raise StartupError("Upload storage initialization failed; check permissions and database") from None
         try:
@@ -73,7 +78,16 @@ def create_app(settings: Settings | None = None, *, processor=None, model=None) 
             await run_in_threadpool(app.state.documents.stop)
 
     app = FastAPI(title="SITECO Document Retriever", version=VERSION, lifespan=lifespan)
+    @app.middleware('http')
+    async def settings_no_store(request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith('/api/settings'):
+            response.headers['Cache-Control'] = 'no-store'
+        return response
+
     app.state.settings = configuration
+    app.state.memory_settings = MemorySettings(configuration)
+    app.include_router(settings_router)
     app.include_router(router)
     app.include_router(question_router)
 

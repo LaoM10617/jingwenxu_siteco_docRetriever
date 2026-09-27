@@ -1,3 +1,4 @@
+import SettingsPanel from './SettingsPanel';
 import { useEffect, useRef, useState } from "react";
 import { fileProblem, request, statusLabel, type Document } from "./api";
 import EvidencePanel from "./EvidencePanel";
@@ -324,7 +325,7 @@ export default function App() {
               aria-current={tab === value ? "page" : undefined}
               onClick={() => setTab(value)}
             >
-              {{materials: 'Materials', history: 'Session info', settings: 'Setup info'}[value]}
+              {{materials: 'Materials', history: 'Session info', settings: 'Settings'}[value]}
             </button>
           ))}
         </nav>
@@ -510,18 +511,7 @@ export default function App() {
             </p>
           </section>
         )}
-        {tab === "settings" && (
-          <section>
-            <h2>Provider setup (read-only)</h2>
-            <p className="muted">
-              Provider configuration is managed by the server in this build.
-              Personal API key settings are not available yet.
-            </p>
-            <p className="muted">
-              Your browser does not receive server credentials. A healthy server does not prove that a provider key or quota is ready. Before a demo, verify the server configuration and run a small authorized question.
-            </p>
-          </section>
-        )}
+        {tab === "settings" && <SettingsPanel />}
       </aside>
 
       <main inert={sidebar && narrow}>

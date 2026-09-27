@@ -2,11 +2,13 @@
 
 2026-09-27。先读AGENTS.md、logs/current.md、本文，再读P-032、milestones_and_execution_plan.md及相关契约/验收。
 
-## 当前执行入口（2026-09-27 M4.3完成）
+## 当前执行入口（2026-09-27 M4.4完成）
 
-M4.3已按P-033实现本地PDF原页/证据及上下文区域高亮、同层缩放、CSV逻辑记录和全部原字段预览；接口及降级见docs/m43-preview-contract.md。54项相关后端通过，Linux预览17通过，浏览器32通过/12 opt-in跳过，最终重新展开来源回查修复后3项再通过。真实D01第1页、D06第2页、D09记录1均已GET-only浏览器核对，零写请求/模型调用。详见eval/results/m43_preview.md。
+M4.1–M4.3已提交并推送2f3ad2d。M4.4正文对照及P03生成配对完成，单题期限及例外回答改善但章节开头仍缺。用户已确认P-036，后端重排开关已实现默认false，固定模型/5秒预算/失败回退RRF；329项Windows后端测试通过。未重建或启用18094/18095部署，未做真实接入冒烟。Settings没有用户端开关，M4.5统一讨论配置入口。实验、源码、测试及交接均未提交。详见eval/results/m44_prose_comparison.md及P-036。
 
-下一步M4.4依据已有开发证据决定是否重排，不能因指代/生成错误直接引入reranker；再到M4.5提供方配置，凭据生命周期和新接口仍需集中确认。M4.1/M4.2的9次和2次真实调用授权已用完，本轮未新增调用。运行18094/18095已部署M4.3，三文档ready，无新增常驻服务。Git仍de8487d、全部改动未提交，继承文档保留；正式benchmark与功能冻结尚未开始。下文准备记录为历史。
+M4.5.1统一契约已形成：docs/m45-settings-contract.md、P-037；用户已确认Gemini/Groq、Top K/重排/诊断与Voyage最小展示/Key范围和内存生命周期，具体新HTTP/测试边界已由用户确认。随后M4.5.2核对额度/Embedding扩展成本，M4.5.3实现Settings，M4.5.4验收。现有真实外发额度已用完。
+
+M4.3预览契约与证据见docs/m43-preview-contract.md、eval/results/m43_preview.md。运行18094/18095未改，无新增服务；正式benchmark与功能冻结尚未开始。下文准备记录为历史。
 
 ## 已确认顺序
 
@@ -29,3 +31,19 @@ M4用于找问题并改进；M5.0用于冻结后的可复核成绩。正式量�
 最新前端18095、后端18094，Compose siteco-m28-smoke；runtime为tmp/m28-clean/runtime。运行状态接手用HTTP复核，SQLite只允许所属后端访问。旧18091/18089/18087不动；Docker镜像/缓存C盘，数据D盘。
 Gemini/Voyage仅D01/D06/D09已授权范围；新增材料或供应商接收方先确认，付费切换先通知。Voyage共享3RPM/10KTPM、至少20秒间隔，真实调用少量串行。Key仅后端运行时注入；保留题不调参，108页报告不在基线。
 遵循AGENTS技能与审查规则：新公共接口/支持范围/测试边界统一确认；已确认边界内修复验证无需重复询问。M5冻结前Standards/Spec按同一固定范围并行审查，显式覆盖全部未提交文件，更新交接。
+
+
+M4.5.2已完成只读核对，限流建议与Embedding改造成本见docs/m452-voyage-embedding-assessment.md；本机候选参数和暂不扩展建议待用户取舍，尚未改运行参数。下一步M4.5.3。
+
+
+## 2026-09-27 M4.5 实施检查点
+
+用户确认仅调整本机限流及Settings，不扩展Embedding服务、不重建索引。按P-037实现读取/应用/测试/清除接口、Gemini/Groq模型与内存Key、Voyage同模型Key、Top K 1–20及重排开关。任务与上传在接受时冻结配置；配置变更不重置共享准入。前端测试已应用配置，草稿先应用；测试不会随加载/刷新自动运行。
+
+本机启动参数已调整为60 RPM、200000 TPM、Embedding最少1秒间隔、重排成功后1秒间隔；仓库默认保持3 RPM/10000 TPM/20秒，错误冷却保留。账户截图不是当前Key/项目额度实测。Settings展示运行值，不承诺供应商延迟。
+
+验证：Windows后端337 passed（73.57秒）；TypeScript及Vite构建通过；Docker重建后浏览器34 passed、12 opt-in skipped（32.6秒）。真实本地GET及同值PATCH验证代理、no-store和运行参数，原三份文档仍ready。受控测试覆盖凭据脱敏/清除/恢复、修订冲突、任务及上传冻结、重启、Top K诊断和浏览器操作。真实供应商连接/问答未复验；不能报告双模型验收或正式benchmark完成。探测错误无法可靠分类时返回provider_error。
+
+开发测试曾因mock路径错误，让合成假Key/合成输入进入真实SDK并失败；没有使用项目真实Key或文档，不计成功验证。已修正mock并为Settings测试禁止非回环socket连接，保留此失败记录。
+
+部署siteco-m28-smoke：http://127.0.0.1:18095（后端18094），沿用tmp/m28-clean/runtime；默认Top K 8、重排关闭。未commit/push，保留此前所有未提交工作。下一步获授权后做有限真实提供方验收，再M4.6冻结、M5.0正式evaluation、M5；不自动消费旧已耗尽授权。

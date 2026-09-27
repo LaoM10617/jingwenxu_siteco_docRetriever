@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     groq_generation_model: str = "openai/gpt-oss-120b"
     embedding_provider: Literal["voyage"] = "voyage"
     embedding_model: str = "voyage-4"
+    pdf_rerank_enabled: bool = False
+    embedding_rpm: int = Field(default=3, ge=1)
+    embedding_tpm: int = Field(default=10000, ge=4000)
+    embedding_min_interval: float = Field(default=20, ge=0, allow_inf_nan=False)
+    rerank_min_interval: float = Field(default=20, ge=0, allow_inf_nan=False)
     gemini_api_key: SecretStr | None = Field(default=None, repr=False)
     groq_api_key: SecretStr | None = Field(default=None, repr=False)
     voyage_api_key: SecretStr | None = Field(default=None, repr=False)
@@ -79,6 +84,7 @@ def load_settings(env_file: Path | str | None = DEFAULT_ENV_FILE) -> Settings:
             "data_dir": "must be a nonblank directory path, not an existing file",
             "generation_provider": "must be gemini or groq",
             "embedding_provider": "must be voyage",
+            "pdf_rerank_enabled": "must be true or false",
         }
         messages = []
         for error in exc.errors(include_input=False, include_context=False):

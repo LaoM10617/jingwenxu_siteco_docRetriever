@@ -241,3 +241,11 @@ def test_voyage_adapter_sanitizes_sdk_errors_and_disables_hidden_retries(monkeyp
     assert caught.value.code == code and caught.value.retryable == retryable
     assert caught.value.retry_after == delay
     assert 'private' not in str(caught.value)
+
+def test_tier1_local_limits_keep_serial_admission_without_twenty_second_wait(tmp_path):
+    clock = Clock()
+    budget = BudgetScheduler(tmp_path/'budget.sqlite3', now=clock.now, wait=clock.wait,
+                             rpm=60, tpm=200000, min_interval=1)
+    for _ in range(8):
+        budget.run(lambda: None, 4000, 'document', Event(), None)
+    assert 1007 <= clock.value < 1008

@@ -134,6 +134,14 @@ class AnswerService:
                             'omitted_evidence_count': context['omitted_evidence_count']},
                 'provider': self.model.provider, 'model': self.model.model,
                 **({'memory': memory} if memory is not None else {})}
+        pdf_tools = [t for t in bundle['tools'] if t['tool'] == 'retrieve_pdf']
+        if pdf_tools:
+            diagnostics = deepcopy(pdf_tools[0]['result'].get('diagnostics'))
+            if diagnostics is not None:
+                included = sum(e['source']['locator']['kind'] == 'pdf' for e in context['evidence'])
+                diagnostics.update(context_included_count=included,
+                    context_omitted_count=diagnostics['selected_count']-included)
+                base['retrieval_diagnostics'] = diagnostics
         if not context['evidence']:
             codes = {u['code'] for u in bundle['unresolved']}
             outcome = ('needs_clarification' if 'needs_clarification' in codes else

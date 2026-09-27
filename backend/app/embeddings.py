@@ -27,7 +27,9 @@ class EmbeddingError(Exception):
 
 
 class BudgetScheduler:
-    def __init__(self, database, *, now=time.time, wait=None, max_pending=32, max_wait=180):
+    def __init__(self, database, *, now=time.time, wait=None, max_pending=32, max_wait=180,
+                 rpm=3, tpm=10000, min_interval=20):
+        self.rpm, self.tpm, self.min_interval = rpm, tpm, min_interval
         self.database, self.now = database, now
         self.wait = wait or (lambda condition, seconds: condition.wait(seconds))
         self.condition = Condition()
@@ -68,12 +70,12 @@ class BudgetScheduler:
                             db.execute('BEGIN IMMEDIATE')
                             db.execute('DELETE FROM embedding_budget WHERE sent_at<=?', (now - 60,))
                             events = db.execute('SELECT sent_at,tokens FROM embedding_budget ORDER BY sent_at').fetchall()
-                            delay = max(0, events[-1][0] + 20 - now) if events else 0
+                            delay = max(0, events[-1][0] + self.min_interval - now) if events else 0
                             cooldown = db.execute('SELECT until_at FROM embedding_cooldown WHERE id=1').fetchone()
                             if cooldown:
                                 delay = max(delay, cooldown[0] - now)
                             remaining = list(events)
-                            while len(remaining) >= 3 or sum(t for _, t in remaining) + tokens > 10000:
+                            while len(remaining) >= self.rpm or sum(t for _, t in remaining) + tokens > self.tpm:
                                 stamp, _ = remaining.pop(0)
                                 delay = max(delay, stamp + 60 - now)
                             if delay <= 0:

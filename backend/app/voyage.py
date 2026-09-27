@@ -46,11 +46,11 @@ def _retry_after(headers):
 
 
 class VoyageProvider:
-    def __init__(self, api_key):
+    def __init__(self, api_key, *, timeout=30):
         import voyageai
         # Public SDK transport hook, configured before the first SDK request.
         voyageai.requestssession = _session
-        self.client = voyageai.Client(api_key=api_key, max_retries=0, timeout=30)
+        self.client = voyageai.Client(api_key=api_key, max_retries=0, timeout=timeout)
         self.last_usage = None
 
     def embed(self, texts, **options):
@@ -84,7 +84,7 @@ class VoyageProvider:
             raise EmbeddingError('embedding_provider_error') from None
 
 
-def configured_gateway(settings):
+def configured_gateway(settings, *, scheduler=None):
     """One gateway/scheduler per backend, shared by ingestion and queries."""
     from app.embeddings import EmbeddingGateway, BudgetScheduler
     if settings.voyage_api_key is None:
@@ -100,4 +100,6 @@ def configured_gateway(settings):
         return Unconfigured()
     database = settings.data_dir / 'app.sqlite3'
     return EmbeddingGateway(database, VoyageProvider(settings.voyage_api_key.get_secret_value()),
-                            counter, BudgetScheduler(database))
+                            counter, scheduler if scheduler is not None else BudgetScheduler(database,
+                                rpm=settings.embedding_rpm, tpm=settings.embedding_tpm,
+                                min_interval=settings.embedding_min_interval))

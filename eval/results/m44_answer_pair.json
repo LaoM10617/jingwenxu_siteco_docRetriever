@@ -1,0 +1,67 @@
+{
+  "kind": "single_case_development_pair_not_benchmark",
+  "case": "P03",
+  "model": "gemini-3.5-flash-lite",
+  "calls": 2,
+  "additional_voyage_calls": 0,
+  "baseline": {
+    "seconds": 3.297,
+    "raw": {
+      "outcome": "partial",
+      "segments": [
+        {
+          "text": "Für das Karriere-Portal onlyfy (Bewerbermanagement) wird angegeben: „Die Daten werden bis zu 6 Monate aufbewahrt.“",
+          "citation_ids": [
+            "S1",
+            "S2"
+          ],
+          "calculation_ids": []
+        }
+      ],
+      "gaps": [
+        "Die im Dokument vorhandenen Evidenzen enthalten zwar Angaben zur Aufbewahrungsfrist im Abschnitt über das Karriere-Portal onlyfy (6 Monate), bieten jedoch keinen separaten Abschnitt zu spezifischen Aufbewahrungs- oder Löschfristen speziell für abgelehnte Bewerbungen (außer der allgemeinen Angabe zur Aufbewahrung im onlyfy-Bewerbungsverfahren) und nennen dazu keine gesonderten Einschränkungen für beide Bereiche getrennt."
+      ],
+      "calculations": []
+    },
+    "validation": "Original harness failed to restore local index; saved answer passed offline replay, zero rejected segments"
+  },
+  "reranked": {
+    "seconds": 2.937,
+    "raw": {
+      "outcome": "answered",
+      "segments": [
+        {
+          "text": "Wird von uns kein Anstellungsvertrag mit dem Bewerber geschlossen, so werden die Bewerbungsunterlagen zwei Monate nach Bekanntgabe der Absageentscheidung automatisch gelöscht, sofern einer Löschung keine sonstigen berechtigten Interessen unsererseits entgegenstehen (wie beispielsweise eine Beweispflicht in einem Verfahren nach dem Allgemeinen Gleichbehandlungsgesetz (AGG)).",
+          "citation_ids": [
+            "S1"
+          ],
+          "calculation_ids": []
+        },
+        {
+          "text": "Für das Karriereportal onlyfy (Bewerbungsverfahren) werden die Daten bis zu 6 Monate aufbewahrt; Rechtsgrundlage hierfür ist eine Einwilligung nach Art. 6 Abs. 1 s. 1 lit. a DSGVO.",
+          "citation_ids": [
+            "S2"
+          ],
+          "calculation_ids": []
+        }
+      ],
+      "gaps": [],
+      "calculations": []
+    },
+    "outcome": "partial",
+    "validation": {
+      "rejected_segments": 0
+    }
+  },
+  "manual_assessment": {
+    "baseline": "Only onlyfy up to six months; explicitly lacks separate rejection retention evidence",
+    "reranked": "Adds two months after rejection, legitimate-interest exception and AGG example; separately states onlyfy up to six months and consent basis",
+    "citation_support": "Reranked S1 page6 supports first segment; S2 page11 supports second segment; no invented section number",
+    "remaining_gap": "Page5 section7.3 introduction still absent; fixed evidence completeness remains 3/4",
+    "conclusion": "Observed factual improvement in one pair; no general quality or latency guarantee; production adoption pending contract confirmation"
+  },
+  "source_paths": [
+    "tmp\\m44-prose\\answers-20260927",
+    "tmp\\m44-prose\\answers-reranked-20260927"
+  ]
+}

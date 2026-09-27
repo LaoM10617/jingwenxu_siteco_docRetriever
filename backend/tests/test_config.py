@@ -15,7 +15,7 @@ def isolated_environment(monkeypatch):
         if name.upper() in {
             "APP_PORT", "DATA_DIR", "GEMINI_API_KEY", "GROQ_API_KEY",
             "VOYAGE_API_KEY", "GENERATION_PROVIDER", "GEMINI_GENERATION_MODEL",
-            "GROQ_GENERATION_MODEL", "EMBEDDING_PROVIDER", "EMBEDDING_MODEL",
+            "GROQ_GENERATION_MODEL", "EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "PDF_RERANK_ENABLED",
         }:
             monkeypatch.delenv(name)
 
@@ -141,3 +141,15 @@ def test_default_and_relative_dotenv_follow_project_location(tmp_path, monkeypat
     assert loader().app_port == 8000
     assert loader().data_dir == root / "data/runtime"
     assert not (root / "data/runtime").exists()
+
+
+def test_rerank_environment_switch(monkeypatch):
+    from app.config import ConfigurationError
+    assert load_settings(env_file=None).pdf_rerank_enabled is False
+    monkeypatch.setenv('PDF_RERANK_ENABLED', 'true')
+    assert load_settings(env_file=None).pdf_rerank_enabled is True
+    monkeypatch.setenv('PDF_RERANK_ENABLED', 'invalid-secret')
+    with pytest.raises(ConfigurationError) as error:
+        load_settings(env_file=None)
+    assert 'PDF_RERANK_ENABLED' in str(error.value)
+    assert 'invalid-secret' not in str(error.value)

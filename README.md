@@ -9,7 +9,7 @@ See [development setup](docs/development.md) for Python 3.12 environment creatio
 The current implementation supports selected-document PDF/CSV questions, mixed
 scopes, asynchronous task polling, source expansion and temporary multi-turn
 conversation memory. PDF retrieval combines global lexical/vector candidate lists
-(20 each) with equal-weight RRF (k=60), returning up to 8 passages. CSV lookup
+(20 each) with equal-weight RRF (k=60), returning up to 8 passages by default (Settings: 1–20). CSV lookup
 uses exact, case-sensitive order numbers and retains duplicate source records.
 History helps resolve subjects; each answer retrieves fresh evidence from the
 currently selected materials. See the [retrieval contract](docs/m26-retrieval-contract.md),
@@ -27,13 +27,33 @@ the original sequence is not reported as all passing. See the
 M4 development validation and improvements are in progress. Local PDF original-page
 previews with evidence/context regions and CSV record previews are implemented and
 sampled against real citations; see the [M4.3 checkpoint](eval/results/m43_preview.md).
-User-facing provider configuration remains planned; reranking requires evidence and
-a separate decision. Formal numeric
+Settings supports Gemini/Groq model and in-memory Key configuration, Voyage Key configuration, Top K and reranking. See [controlled verification](eval/results/m45_settings.md); live provider revalidation remains pending. The default configuration retains RRF. An
+8-question prose-PDF development comparison increased required evidence in context
+from 10/12 to 11/12, with complete coverage unchanged at 7/8 questions. One subsequent paired answer check recovered the missing retention rule and
+exception. This is a single-case improvement, with an evidence gap still remaining;
+optional reranking is implemented through Settings and a startup environment default (off by default). See the [comparison and remaining check](eval/results/m44_prose_comparison.md).
+Formal numeric
 evaluation is required at M5.0 after feature freeze, with scoring details fixed
 before execution. Multi-model comparison is conditional. Feature freeze, formal
 evaluation and the M5 rebuild/delivery rehearsal are not complete. See
 [P-032](decisions.md#p-032m4开发验证与冻结后正式evaluation分离) and the
 [M4 handoff](docs/m4-handoff.md).
+
+## Optional PDF reranking
+
+Set `PDF_RERANK_ENABLED=true` in the backend environment (or Compose `.env`) and
+recreate/restart the backend to enable fixed Voyage `rerank-2.5-lite` using the
+existing `VOYAGE_API_KEY`. The default is `false`; Settings can override it in memory without restarting. Enabling it sends the question and the PDF candidate passages to Voyage and
+adds usage charges. It does not affect CSV lookup.
+
+Reranking uses the same candidate union before selecting the configured Top K sources. It has a
+5-second budget within the existing question deadline, no retries, one in-flight
+request and a configurable minimum interval after completion per backend process (default 20 seconds, `RERANK_MIN_INTERVAL`). Error cooldowns remain separate.
+Busy/cooldown, provider errors, invalid output or timeout retain the original RRF
+order and add a visible source warning. Provider timing and fallback reasons are
+logged without keys or document text. A timed-out network request may finish in
+the background; no additional rerank request starts until it finishes. The small
+development comparison does not establish universal quality or latency gains.
 
 ## Ask questions with Docker
 
@@ -227,7 +247,7 @@ Fix configuration and upload again for these non-retryable configuration states.
 Published PDFs restore from local artifacts without embedding calls. New queries
 require query embeddings, unless already cached; retrieval requires configured
 Voyage/tokenizer even when the query is cached. The single shared budget is
-3 RPM/10K TPM with at least 20 seconds between request starts. Waiting is visible
+configurable through `EMBEDDING_RPM`, `EMBEDDING_TPM`, and `EMBEDDING_MIN_INTERVAL`: defaults are 3 RPM/10K TPM and 20 seconds between starts. The current local demonstration uses 60 RPM/200K TPM and 1 second, with a 1-second rerank interval; these are local admission limits, not verified account allowances. Waiting is visible
 during ingestion; no paid-plan switch is automatic.
 
 ## Using the workspace
@@ -406,3 +426,12 @@ establish a general accuracy rate or stable latency percentile.
 
 M4.2 targeted repairs and verification are recorded in [the development checkpoint](eval/results/m42_experience.md).
 These sampled checks are not a formal benchmark or a general reliability estimate.
+
+
+## Runtime Settings
+
+Open Settings to choose Gemini/Groq, set the model and Key, change PDF Top K (1–20), or enable reranking. Voyage remains voyage-4 with the existing index format; alternate embedding endpoints and index rebuilding are outside scope. Candidate counts and the context budget remain fixed; per-turn diagnostics distinguish selected sources from sources included in context.
+
+Apply saves instance-wide overrides in backend memory without contacting providers. Refresh preserves applied configuration; backend restart restores startup environment defaults. Blank Key fields keep the existing value. Clear credentials disables new tasks; Restore defaults may re-enable startup credentials. Already accepted questions and uploads retain their frozen configuration. Keys are never returned to the browser or persisted by Settings.
+
+Connection tests explicitly send fixed text to the selected provider and may incur charges. Apply a draft before testing it. A passing simple structured-output probe does not guarantee full question capability; service health alone does not validate a Key. This remains a local single-user application without multi-user authentication.

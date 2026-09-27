@@ -702,3 +702,11 @@ dialog::backdrop {
 .legend-context { border-bottom: 3px dashed var(--accent); }
 .preview-record { border-left: 3px solid #996b13; padding: 12px; background: #fffaf0; }
 .preview-scroll:focus-visible { outline: 3px solid #6ba8d3; outline-offset: 2px; }
+
+.settings-panel fieldset { border: 0; padding: 0; margin: 1rem 0; min-width: 0; }
+.settings-panel label { display: grid; gap: .35rem; margin: .8rem 0; }
+.settings-panel input:not([type="checkbox"]), .settings-panel select { width: 100%; min-width: 0; box-sizing: border-box; padding: .6rem; font: inherit; border: 1px solid var(--line, #ccd4cf); border-radius: 5px; }
+.settings-panel .settings-check { display: flex; align-items: center; gap: .5rem; }
+.settings-panel hr { border: 0; border-top: 1px solid #d9dfdb; margin: 1.2rem 0; }
+.settings-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.settings-panel p { overflow-wrap: anywhere; }

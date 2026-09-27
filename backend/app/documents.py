@@ -36,6 +36,8 @@ class DocumentService:
         self._jobs = Queue(maxsize=max_documents)
         self._thread = None
         self._published = {}
+        self.processor_factory = None
+        self._job_processors = {}
         self._csv_ready = set()
         with closing(sqlite3.connect(self.database)) as db, db:
             db.execute('''CREATE TABLE IF NOT EXISTS documents (
@@ -106,6 +108,7 @@ class DocumentService:
                 raise DocumentError('invalid_pdf_header', 'The file does not have a PDF header.', 415)
             # CSV has no reliable magic signature; structural validation belongs to parsing.
             temporary.replace(destination)
+            bound_processor = self.processor_factory() if self.processor_factory else None
             now = datetime.now(timezone.utc).isoformat()
             with closing(sqlite3.connect(self.database)) as db, db:
                 db.execute('INSERT INTO documents VALUES (?,?,?,?,?,?,?,?,?,?)',
@@ -118,6 +121,8 @@ class DocumentService:
                     if self._stop.is_set():
                         self._fail(document_id, 'processing_interrupted')
                     else:
+                        if bound_processor is not None:
+                            self._job_processors[document_id] = bound_processor
                         self._jobs.put_nowait(document_id)
             return document
         except (OSError, sqlite3.Error):
@@ -248,7 +253,7 @@ class DocumentService:
                     if not changed:
                         continue
                 document = self.get(document_id)
-                prepared = self._processor.prepare(self.uploads / document['stored_name'], document,
+                prepared = self._job_processors.get(document_id, self._processor).prepare(self.uploads / document['stored_name'], document,
                     lambda stage, **kwargs: self._report(document_id, stage, **kwargs), self._stop)
                 if isinstance(prepared, PreparedPdf):
                     # Detach evidence and vectors before validation/publication.
@@ -298,6 +303,7 @@ class DocumentService:
                     # Storage may be unavailable; do not kill the worker or expose inputs.
                     logging.getLogger(__name__).error('Cannot persist processing failure; restart recovery required')
             finally:
+                self._job_processors.pop(document_id, None)
                 self._jobs.task_done()
 
     def retry(self, document_id):
@@ -321,6 +327,8 @@ class DocumentService:
             db.execute('DELETE FROM pdf_fts WHERE document_id=?', (document_id,))
             db.execute('DELETE FROM document_artifacts WHERE document_id=?', (document_id,))
             db.commit()
+            if self.processor_factory:
+                self._job_processors[document_id] = self.processor_factory()
             self._jobs.put_nowait(document_id)
             return self.get(document_id)
 

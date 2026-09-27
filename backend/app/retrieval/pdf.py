@@ -12,9 +12,11 @@ from app.retrieval.fusion import reciprocal_rank_fusion
 
 
 class PdfRetriever:
-    def __init__(self, documents, lexical, gateway=None):
+    def __init__(self, documents, lexical, gateway=None, *, reranker=None, default_top_k=8):
         self.documents, self.lexical = documents, lexical
         self.gateway = gateway
+        self.reranker = reranker
+        self.default_top_k = default_top_k
 
     def _scope(self, question, document_ids, top_k):
         if (not isinstance(question, str) or not question.strip() or len(question) > 8000
@@ -34,7 +36,8 @@ class PdfRetriever:
                 raise DocumentError('document_not_pdf', 'PDF retrieval requires PDF documents.', 422)
         return scope
 
-    def retrieve(self, question, document_ids, top_k=8, *, stop=None, on_wait=None, on_start=None):
+    def retrieve(self, question, document_ids, top_k=None, *, stop=None, on_wait=None, on_start=None):
+        top_k = self.default_top_k if top_k is None else top_k
         scope = self._scope(question, document_ids, top_k)
         if self.gateway is None:
             raise DocumentError('retrieval_not_configured', 'Hybrid retrieval is not configured.', 503)
@@ -70,7 +73,7 @@ class PdfRetriever:
                                     'semantic_rank': None, 'semantic_score': None,
                                     'matched_literals': []}).update(row)
         order = reciprocal_rank_fusion([[identity(r) for r in lexical],
-                                       [identity(r) for r in semantic]], k=60, top_k=top_k)
+                                       [identity(r) for r in semantic]], k=60, top_k=40 if self.reranker is not None else top_k)
         rows = []
         for rank, key in enumerate(order, 1):
             row = merged[key]
@@ -78,10 +81,22 @@ class PdfRetriever:
             row['fused_score'] = sum(1 / (60 + row[field]) for field in ('lexical_rank', 'semantic_rank')
                                      if row[field] is not None)
             rows.append(row)
+        rerank_route = {}
+        warnings = []
+        if self.reranker is not None and rows:
+            rows, info = self.reranker.rank(question, rows, stop=stop)
+            rerank_route = {'rerank': info}
+            if info['status'] == 'fallback':
+                warnings.append({'code': 'rerank_fallback',
+                    'message': 'Optional reranking unavailable; using the original RRF order.'})
         return {'document_ids': scope, 'routes': {
                     'lexical': {'status': 'ok', 'count': len(lexical)},
-                    'semantic': {'status': 'ok', 'count': len(semantic)}},
-                'warnings': [], 'records': json.loads(json.dumps(rows))}
+                    'semantic': {'status': 'ok', 'count': len(semantic)}, **rerank_route},
+                'warnings': warnings, 'records': json.loads(json.dumps(rows[:top_k])),
+                'diagnostics': {'strategy': ('rrf_reranked' if rerank_route['rerank']['status']=='ok' else 'rrf_fallback') if rerank_route else 'rrf',
+                    'lexical_candidates': len(lexical), 'semantic_candidates': len(semantic),
+                    'union_count': len(merged), 'requested_top_k': top_k, 'selected_count': len(rows[:top_k]),
+                    'rerank': rerank_route.get('rerank')}}
 
     def lexical_candidates(self, question, document_ids, top_k=20):
         scope = self._scope(question, document_ids, top_k)

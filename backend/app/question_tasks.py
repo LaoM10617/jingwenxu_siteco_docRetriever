@@ -19,9 +19,11 @@ class Submission(QuestionRequest):
 
 
 class QuestionTasks:
-    def __init__(self, database, answers, *, now=time.monotonic, max_pending=8):
+    def __init__(self, database, answers, *, now=time.monotonic, max_pending=8, answer_factory=None):
         self.database, self.answers, self.now = database, answers, now
         self.max_pending = max_pending
+        self.answer_factory = answer_factory
+        self.bound_answers = {}
         self.condition, self.stopped = Condition(), Event()
         self.pending, self.budgets = deque(), {}
         with closing(sqlite3.connect(database)) as db, db:
@@ -31,6 +33,8 @@ class QuestionTasks:
                 created REAL NOT NULL, deadline REAL NOT NULL, answer TEXT, error TEXT,
                 UNIQUE(conversation, request_id))''')
             columns = {r[1] for r in db.execute('PRAGMA table_info(question_tasks)')}
+            if 'config_snapshot' not in columns:
+                db.execute('ALTER TABLE question_tasks ADD COLUMN config_snapshot TEXT')
             if 'conversation_expires' not in columns:
                 db.execute('ALTER TABLE question_tasks ADD COLUMN conversation_expires REAL')
                 db.execute("""UPDATE question_tasks SET conversation_expires=(
@@ -57,6 +61,7 @@ class QuestionTasks:
         return {'question_id': row['id'], **request, 'status': row['status'], 'stage': row['stage'],
                 'created_at': row['created'], 'deadline_at': row['deadline'],
                 'conversation_expires_at': row['conversation_expires'],
+                'config_snapshot': json.loads(row['config_snapshot']) if row['config_snapshot'] else None,
                 'answer': json.loads(row['answer']) if row['answer'] else None,
                 'error': json.loads(row['error']) if row['error'] else None}
 
@@ -103,10 +108,13 @@ class QuestionTasks:
                 raise DocumentError('question_capacity', 'Temporary question storage is full. Try later.', 503, True)
             budget.check()
             identity = uuid4().hex
-            db.execute('INSERT INTO question_tasks VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+            bound = self.answer_factory() if self.answer_factory is not None else self.answers
+            public_config = getattr(bound, 'config_snapshot', None)
+            db.execute('INSERT INTO question_tasks (id,conversation,request_id,request,status,stage,created,deadline,answer,error,conversation_expires,config_snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                        (identity, body['conversation_id'], request_id, encoded, 'queued', 'queued', received,
-                        received + 240, None, None, expires))
+                        received + 240, None, None, expires, json.dumps(public_config) if public_config else None))
             db.commit()
+            self.bound_answers[identity] = bound
             self.budgets[identity] = budget
             self.pending.append(identity)
             self.condition.notify_all()
@@ -193,7 +201,7 @@ class QuestionTasks:
                 if parent_id:
                     with closing(sqlite3.connect(self.database)) as db:
                         memory = {'history': self._history(db, parent_id, row['conversation'])}
-                answer = self.answers.answer(request, **memory, budget=budget,
+                answer = self.bound_answers[identity].answer(request, **memory, budget=budget,
                     on_stage=lambda stage: self._stage(identity, stage),
                     on_wait=lambda: self._stage(identity, 'waiting_rate_limit'))
                 budget.check()
@@ -216,6 +224,7 @@ class QuestionTasks:
                         budget.deadline = 0
                         continue
                     self.budgets.pop(identity, None)
+                    self.bound_answers.pop(identity, None)
 
     def stop(self):
         self.stopped.set()

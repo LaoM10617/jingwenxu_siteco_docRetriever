@@ -4,6 +4,7 @@ import { HttpError, request, type Evidence } from './api';
 export type Source = Evidence & {citation_id?: string; document_id: string; evidence_id: string;
   original_filename?: string; context?: {text: string}[]};
 export type Answer = {
+  retrieval_diagnostics?: {strategy: string; union_count: number; selected_count: number; requested_top_k: number; context_included_count: number; context_omitted_count: number; rerank?: {status: string; reason?: string; seconds: number} | null};
   memory?: {resolved_question?: string; references: {question_id: string; term: string}[]};
   outcome: string; segments: {text: string; citation_ids: string[]; calculation_ids: string[]}[];
   citations: Source[]; gaps: string[]; warnings: {message: string; page_number?: number; code: string}[];
@@ -14,6 +15,7 @@ export type Answer = {
 };
 type Submission = {conversation_id: string; request_id: string; question: string; document_ids: string[]; previous_question_id?: string};
 export type Task = Submission & {question_id: string; status: string; stage: string;
+  config_snapshot?: {generation: {provider: string; model: string}; retrieval: {top_k: number; rerank_enabled: boolean}} | null;
   conversation_expires_at?: number; created_at?: number;
   answer: Answer | null; error: {code: string; message: string} | null};
 export type Turn = {body: Submission; question_id?: string; task?: Task; error?: string;
