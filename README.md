@@ -4,6 +4,16 @@ The current build provides a React/TypeScript document chat and a FastAPI backen
 
 See [development setup](docs/development.md) for Python 3.12 environment creation, pinned dependency installation, and verification commands. See [reuse notes](docs/reuse.md) for provenance and migration boundaries.
 
+## Reviewer entry points
+
+- Start here for Docker commands and required credentials; the browser entry is
+  **http://127.0.0.1:8080** with default ports. No hosted deployment is required.
+- [Delivery guide](docs/delivery.md): source/history handover, material acquisition,
+  architectural decisions, a 10-minute demo outline and remaining work.
+- [Evaluation](eval/README.md): inspect the HTML report locally or recompute its
+  summaries without API calls. Live reproduction requires your own keys/materials.
+- [Reuse and provenance](docs/reuse.md): reused components and implementation boundaries.
+
 ## Implemented and verified scope
 
 The current implementation supports selected-document PDF/CSV questions, mixed
@@ -32,12 +42,14 @@ Settings supports Gemini/Groq model and in-memory Key configuration, Voyage Key 
 from 10/12 to 11/12, with complete coverage unchanged at 7/8 questions. One subsequent paired answer check recovered the missing retention rule and
 exception. This is a single-case improvement, with an evidence gap still remaining;
 optional reranking is implemented through Settings and a startup environment default (off by default). See the [comparison and remaining check](eval/results/m44_prose_comparison.md).
-Formal numeric
-evaluation is required at M5.0 after feature freeze, with scoring details fixed
-before execution. Multi-model comparison is conditional. M4 feature freeze is complete; formal
-evaluation and the M5 rebuild/delivery rehearsal are not complete. See
-[P-032](decisions.md#p-032m4开发验证与冻结后正式evaluation分离) and the
-[M4 handoff](docs/m4-handoff.md).
+The first formal M5.0 A+B evaluation is complete: strict pass 3/12, required-fact
+coverage 10/40, and default RRF evidence coverage 10/12. These small-set results
+include provider failures and blocked dependent turns; they are not a general
+accuracy estimate. See the [report](eval/results/m50/run-20260927-ab-01/report.md)
+and [reproduction instructions](eval/README.md). A subsequently discovered
+sentence-final-period validation defect has been fixed with local regression;
+the original evaluation scores remain unchanged. Clean-runtime live acceptance
+and final delivery are still pending. Multi-model comparison has not been run.
 
 ## Optional PDF reranking
 
@@ -118,7 +130,7 @@ Empty directories are not tracked by Git. Requirements, private materials, runti
 Retrieval_SITECO/
 ├── README.md                      # Entry point for operators and reviewers
 ├── AGENTS.md                      # Project collaboration rules
-├── requirements_draft.md           # Requirements, scope of support, and items for discussion
+├── requirements_draft.md           # Local-only requirements notes; not in the clone
 ├── milestones_and_execution_plan.md
 ├── decisions.md                    # Confirmed choices and testing boundaries
 ├── .gitignore
