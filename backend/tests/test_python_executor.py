@@ -4,18 +4,23 @@ from pathlib import Path
 
 import pytest
 
-from app.python_executor import PythonExecutor
+from app.python_executor import PythonExecutor, PYTHON_IMAGE
 
 
 pytestmark = pytest.mark.skipif(os.getenv('SITECO_DOCKER_TESTS') != '1',
                                 reason='requires an explicitly enabled Docker daemon')
 
 
+def executor(*args, **kwargs):
+    kwargs.setdefault('image', os.getenv('SITECO_RUNNER_IMAGE', PYTHON_IMAGE))
+    return PythonExecutor(*args, **kwargs)
+
+
 def test_fixed_script_reads_only_supplied_input(tmp_path):
     source = tmp_path / 'numbers.csv'
     source.write_text('amount\n2\n3\n', encoding='utf-8')
-    executor = PythonExecutor(tmp_path / 'jobs')
-    result = executor.execute('''import csv, json
+    runner = executor(tmp_path / 'jobs')
+    result = runner.execute('''import csv, json
 with open('/inputs/data.csv') as stream:
     values = [int(row['amount']) for row in csv.DictReader(stream)]
 print(json.dumps({'total': sum(values)}))
@@ -30,7 +35,7 @@ def test_application_secrets_mounts_network_and_writes_are_isolated(tmp_path, mo
     monkeypatch.setenv('GEMINI_API_KEY', 'phase-a-canary-not-a-real-key')
     source = tmp_path / 'input.txt'
     source.write_text('unchanged', encoding='utf-8')
-    result = PythonExecutor(tmp_path / 'jobs').execute('''import json, os, socket
+    result = executor(tmp_path / 'jobs').execute('''import json, os, socket
 def denied(path):
     try:
         with open(path, 'w') as stream: stream.write('bad')
@@ -65,7 +70,7 @@ print(json.dumps({
     ("raise RuntimeError('expected probe failure')", 'failed'),
 ])
 def test_failures_are_explicit_and_cleaned(tmp_path, script, expected):
-    result = PythonExecutor(tmp_path / 'jobs', timeout=2, output_bytes=8192).execute(script, {})
+    result = executor(tmp_path / 'jobs', timeout=2, output_bytes=8192).execute(script, {})
     assert result.status == expected
     assert result.value is None
     assert result.cleaned_up
@@ -78,7 +83,7 @@ def test_stop_terminates_active_container(tmp_path):
     timer = Timer(1.5, cancel.set)
     timer.start()
     try:
-        result = PythonExecutor(tmp_path / 'jobs').execute('import time; time.sleep(60)', {}, cancel=cancel)
+        result = executor(tmp_path / 'jobs').execute('import time; time.sleep(60)', {}, cancel=cancel)
     finally:
         timer.cancel()
     assert result.status == 'cancelled'
@@ -86,7 +91,7 @@ def test_stop_terminates_active_container(tmp_path):
 
 
 def test_memory_limit_is_real(tmp_path):
-    result = PythonExecutor(tmp_path / 'jobs').execute('x = bytearray(512 * 1024 * 1024)', {})
+    result = executor(tmp_path / 'jobs').execute('x = bytearray(512 * 1024 * 1024)', {})
     assert result.status == 'failed'
     assert result.cleaned_up
 
@@ -107,7 +112,7 @@ def test_uncertain_create_response_still_cleans_container(tmp_path, monkeypatch)
     monkeypatch.setattr(subprocess, 'run', lose_create_response)
     try:
         with pytest.raises(subprocess.TimeoutExpired):
-            PythonExecutor(tmp_path / 'jobs').execute("print('{}')", {})
+            executor(tmp_path / 'jobs').execute("print('{}')", {})
         inspection = original(['docker', 'container', 'ls', '-aq', '--filter', f'name=^/{names[0]}$'],
                               capture_output=True, check=True)
         assert inspection.stdout.strip() == b''

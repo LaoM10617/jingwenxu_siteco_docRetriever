@@ -9,7 +9,7 @@ def test_status_http_is_safe_and_survives_restart(tmp_path):
     ids = []
     with TestClient(create_app(Settings(data_dir=tmp_path))) as client:
         for _ in range(2):
-            ids.append(client.post('/api/documents', files={'file': ('same.csv', b'id\n1')}).json()['document_id'])
+            ids.append(client.post('/api/documents', files={'file': ('same.csv', b'id,id\n1,2')}).json()['document_id'])
         assert ids[0] != ids[1]
         for doc_id in ids:
             for _ in range(100):

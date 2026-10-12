@@ -482,7 +482,12 @@ class DocumentService:
                 row = self._csv.read_one(document_id, evidence_id)
             elif document_id in self._published:
                 prepared, _ = self._published[document_id]
-                row = next((e for e in prepared.evidence if e['evidence_id'] == evidence_id), None)
+                if evidence_id.startswith('reading:'):
+                    reading = self._reading(document)
+                    row = next((u for page in reading['pages'] for u in page['units']
+                                if u['evidence_id'] == evidence_id), None)
+                else:
+                    row = next((e for e in prepared.evidence if e['evidence_id'] == evidence_id), None)
             else:
                 row = None
             if row is None:
@@ -503,6 +508,90 @@ class DocumentService:
         if sha256(path.read_bytes()).hexdigest() != document['content_hash']:
             raise DocumentError('original_changed', 'The original file no longer matches this source.', 409)
         return render_pdf(path, source)
+
+    def csv_snapshot(self, session_id, sources):
+        """Copy the complete raw row population after checking session access.
+
+        Models receive a bounded overview separately. These rows are execution
+        inputs, with source identities preserved outside model-generated code.
+        """
+        with self._lock:
+            if self.lifecycle is None or not self.lifecycle.available(session_id, sources):
+                raise DocumentError('source_unavailable', 'CSV sources are not available in this session.', 409)
+            tables = []
+            for source in sources:
+                document = self.get(source.version_id)
+                if source.version_id not in self._csv_ready or document['status'] != 'ready':
+                    raise DocumentError('document_not_csv', 'The source is not an available CSV document.', 409)
+                count = document['parse_result']['record_count']
+                rows, headers = [], None
+                for offset in range(0, count, 100):
+                    for record in self._csv.read(source.version_id, offset, 100):
+                        headers = record['headers']
+                        rows.append({'row_id': record['evidence_id'],
+                                     'record_number': record['locator']['record_number'],
+                                     'values': record['raw_values']})
+                if len(rows) != count or [r['record_number'] for r in rows] != list(range(1, count + 1)):
+                    raise DocumentError('csv_snapshot_incomplete', 'CSV data changed while preparing execution.', 409)
+                tables.append({'source': source.model_dump(), 'original_filename': document['original_filename'],
+                               'content_hash': document['content_hash'],
+                               'parser_version': document['parse_result']['parser_version'],
+                               'headers': headers, 'rows': rows})
+            if not self.lifecycle.available(session_id, sources):
+                raise DocumentError('source_unavailable', 'CSV sources are no longer available.', 409)
+            return tables
+
+    def _reading(self, document, budget=None):
+        """Supplement old parse checkpoints without replacing retrieval identities."""
+        from app.parsing import parse_document, ParseLimits, ParseError
+        from app.pdf_reading import READING_VERSION
+        if budget is not None:
+            budget.check()
+        path = (self.uploads / document['stored_name']).resolve()
+        if path.parent != self.uploads.resolve() or not path.is_file():
+            raise DocumentError('original_unavailable', 'The original PDF is unavailable for complete reading.', 409)
+        if sha256(path.read_bytes()).hexdigest() != document['content_hash']:
+            raise DocumentError('original_changed', 'The original PDF no longer matches this version.', 409)
+        parsed = document['parse_result'] or {}
+        reading = parsed.get('reading')
+        if (reading is None or reading.get('reading_version') != READING_VERSION
+                or reading.get('content_hash') != document['content_hash']):
+            try:
+                result = parse_document(path, 'application/pdf', ParseLimits(),
+                                        check=budget.check if budget is not None else None)
+            except ParseError as exc:
+                raise DocumentError(exc.code, 'Cannot prepare complete PDF reading.', 409) from None
+            reading = result.reading
+            # The original evidence and parser metadata still describe the published
+            # vectors. Only the independent reading representation is supplemented.
+            parsed['reading'] = reading
+            with closing(sqlite3.connect(self.database)) as db, db:
+                db.execute('UPDATE document_parses SET payload=? WHERE document_id=?',
+                           (json.dumps(parsed, allow_nan=False), document['document_id']))
+        if budget is not None:
+            budget.check()
+        return reading
+
+    def pdf_reading_snapshot(self, session_id, sources, budget=None):
+        """Return all native page units, separately from ranked retrieval evidence."""
+        with self._lock:
+            if self.lifecycle is None or not self.lifecycle.available(session_id, sources):
+                raise DocumentError('source_unavailable', 'PDF sources are not available in this session.', 409)
+            snapshots = []
+            for source in sources:
+                document = self.get(source.version_id)
+                if (document is None or document['status'] != 'ready'
+                        or not document['original_filename'].lower().endswith('.pdf')):
+                    raise DocumentError('document_not_pdf', 'The source is not an available PDF document.', 409)
+                reading = self._reading(document, budget)
+                snapshots.append({'source': source.model_dump(),
+                    'original_filename': document['original_filename'],
+                    'content_hash': document['content_hash'],
+                    'reading_version': reading['reading_version'], 'pages': reading['pages'],
+                    'warnings': reading['warnings'] + (document['parse_result'] or {}).get('warnings', [])})
+            if not self.lifecycle.available(session_id, sources):
+                raise DocumentError('source_unavailable', 'PDF sources are no longer available.', 409)
+            return json.loads(json.dumps(snapshots, allow_nan=False))
 
     def pdf_snapshot(self, document_ids):
         with self._lock:
@@ -559,11 +648,12 @@ ERRORS = {
     'embedding_queue_full': ('Embedding queue is full; retry later.', True),
     'embedding_wait_timeout': ('Embedding quota wait timed out; retry later.', True),
     'embedding_interrupted': ('Embedding was interrupted; retry the document.', True),
-    'csv_header_invalid': ('CSV headers do not match the supported price-list schema.', False),
+    'csv_header_invalid': ('CSV requires nonempty, unique column names.', False),
+    'csv_dialect_ambiguous': ('CSV delimiter is ambiguous; use consistent comma, semicolon or tab delimiters.', False),
     'csv_record_limit': ('CSV exceeds the 20,000 record limit.', False),
     'csv_record_invalid': ('CSV record has the wrong number of fields.', False),
     'csv_no_records': ('CSV contains no data records.', False),
-    'csv_encoding_invalid': ('CSV must use UTF-8 encoding.', False),
+    'csv_encoding_invalid': ('CSV must use UTF-8 or BOM-marked UTF-16 encoding.', False),
     'csv_unreadable': ('CSV quoting is invalid or a field exceeds the reader limit.', False),
     'csv_no_order_ids': ('CSV contains no searchable order IDs; inspect the retained warnings.', False),
     'retrieval_not_configured': ('PDF parsing completed; embedding and retrieval are not configured in this build.', False),

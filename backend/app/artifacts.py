@@ -1,8 +1,4 @@
-"""Persist small results and their provenance; never equate history with reuse.
-
-Large tables/files will use a separate blob store when CSV analysis is added.
-Stage B stores bounded JSON and clears derived content on permanent deletion.
-"""
+"""Persist bounded JSON results and provenance; never equate history with reuse."""
 from contextlib import contextmanager, nullcontext
 import json
 import sqlite3
@@ -52,7 +48,7 @@ class ArtifactStore:
         return ScopeSnapshot.model_validate_json(row['scope'])
 
     def publish(self, sid, artifact_id, snapshot_id, *, kind, payload,
-                calculation=None, unit=None, cache_key=None, db=None):
+                calculation=None, unit=None, cache_key=None, scope=None, db=None):
         """Publishing belongs to the trusted graph, not a public client route.
 
         Dependencies conservatively include the entire accepted snapshot. A later
@@ -67,13 +63,17 @@ class ArtifactStore:
             encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, allow_nan=False)
         except (ValueError, TypeError):
             raise DocumentError('invalid_artifact', 'Artifact must contain finite JSON data.', 422) from None
-        if len(encoded.encode('utf-8')) > 1_048_576:
+        if len(encoded.encode('utf-8')) > 16_777_216:
             raise DocumentError('artifact_too_large', 'Artifact exceeds the inline storage limit.', 413)
         owns_transaction = db is None
         with self._db() if owns_transaction else nullcontext(db) as db:
             if owns_transaction:
                 db.execute('BEGIN IMMEDIATE')
-            scope = self._snapshot(db, sid, snapshot_id)
+            accepted = self._snapshot(db, sid, snapshot_id)
+            scope = accepted if scope is None else scope
+            if (not set(scope.documents) <= set(accepted.documents)
+                    or scope.purpose != accepted.purpose or not set(accepted.filters) <= set(scope.filters)):
+                raise DocumentError('invalid_artifact_scope', 'Artifact exceeds the accepted scope.', 422)
             old = db.execute('SELECT * FROM artifact_records WHERE session_id=? AND artifact_id=?',
                              (sid, artifact_id)).fetchone()
             if old is not None:
@@ -81,7 +81,8 @@ class ArtifactStore:
                     raise DocumentError('artifact_invalidated', 'Deleted-source artifacts cannot be republished.', 409)
                 if any(old[key] != value for key, value in {
                     'snapshot_id': snapshot_id, 'kind': kind, 'payload': encoded,
-                    'calculation': calculation, 'unit': unit, 'cache_key': cache_key}.items()):
+                    'calculation': calculation, 'unit': unit, 'cache_key': cache_key,
+                    'scope': scope.model_dump_json()}.items()):
                     raise DocumentError('artifact_conflict', 'Artifact identity already has different content.', 409)
                 return self._view(db, old)
             self.sessions.validate_sources(db, sid, scope.documents)
@@ -118,6 +119,20 @@ class ArtifactStore:
             if row is None:
                 raise DocumentError('artifact_not_found', 'Unknown session artifact.', 404)
             return self._view(db, row)
+
+    def page(self, sid, artifact_id, offset=0, limit=100):
+        if type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 100:
+            raise DocumentError('invalid_pagination', 'Invalid result pagination.', 422)
+        artifact = self.get(sid, artifact_id)
+        if artifact['kind'] != 'table':
+            raise DocumentError('artifact_not_table', 'This artifact is not a result table.', 422)
+        payload = artifact['payload']
+        if payload is None:
+            raise DocumentError('artifact_invalidated', 'The result data was deleted with its source.', 410)
+        rows = payload['rows']
+        return {'artifact_id': artifact_id, 'columns': payload['columns'], 'rows': rows[offset:offset + limit],
+                'total': len(rows), 'offset': offset, 'limit': limit, 'has_more': offset + limit < len(rows),
+                'source_available': artifact['source_available'], 'scope': artifact['scope'], 'unit': artifact['unit']}
 
     def _reuse(self, db, row, current):
         previous = ScopeSnapshot.model_validate_json(row['scope'])

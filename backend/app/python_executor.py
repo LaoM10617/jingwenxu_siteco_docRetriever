@@ -4,18 +4,28 @@ This is not an HTTP endpoint. Only the controller chooses input files and image.
 No application environment, Docker socket, or writable host path enters a job.
 """
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 import json
 import math
+import re
 from pathlib import Path
 import shutil
 import subprocess
-from tempfile import TemporaryDirectory
+from tempfile import mkdtemp
 from threading import Event, Thread, Lock
 import time
 from uuid import uuid4
 
 
 PYTHON_IMAGE = 'python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e'
+
+
+@contextmanager
+def _staging(work_dir):
+    # Keep inputs on exceptional exit: a failed Docker cleanup may still bind them.
+    directory = Path(mkdtemp(prefix='job-', dir=work_dir))
+    yield directory
+    shutil.rmtree(directory)
 
 
 @dataclass(frozen=True)
@@ -29,14 +39,21 @@ class ExecutionResult:
 
 
 class PythonExecutor:
-    def __init__(self, work_dir: Path, *, timeout=30.0, output_bytes=1_048_576):
+    def __init__(self, work_dir: Path, *, timeout=30.0, output_bytes=1_048_576,
+                 image=PYTHON_IMAGE, owner=None):
         if timeout <= 0 or not 0 < output_bytes <= 16_777_216:
             raise ValueError('Invalid execution limits')
         self.work_dir = Path(work_dir).resolve()
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.timeout, self.output_bytes = timeout, output_bytes
+        if not re.fullmatch(r'(?:[a-zA-Z0-9./:_-]+@)?sha256:[a-f0-9]{64}', image):
+            raise ValueError('Execution image must be pinned to a SHA256 digest')
+        if owner is not None and not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}', owner):
+            raise ValueError('Invalid controller identity')
+        self.image, self.owner = image, owner
 
-    def execute(self, script: str, inputs: dict[str, Path], *, cancel: Event | None = None):
+    def execute(self, script: str, inputs: dict[str, Path], *, cancel: Event | None = None,
+                container_name=None):
         """Return bounded JSON, or an explicit failure; always remove the container.
 
         Docker availability/cleanup failures raise RuntimeError, never success.
@@ -47,8 +64,10 @@ class PythonExecutor:
         timings = {}
         if cancel.is_set():
             return ExecutionResult('cancelled', None, {'total': 0.0}, True)
-        name = 'siteco-python-' + uuid4().hex
-        with TemporaryDirectory(prefix='job-', dir=self.work_dir) as directory:
+        name = container_name or 'siteco-python-' + uuid4().hex
+        if not re.fullmatch(r'siteco-python-[a-f0-9]{32}', name):
+            raise ValueError('Invalid execution container name')
+        with _staging(self.work_dir) as directory:
             root = Path(directory)
             staged = root / 'inputs'
             staged.mkdir()
@@ -75,7 +94,11 @@ class PythonExecutor:
                     '--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=16777216,mode=1777',
                     '--mount', f'type=bind,source={staged},target=/inputs,readonly',
                     '--mount', f'type=bind,source={code},target=/script.py,readonly',
-                    '--workdir', '/tmp', PYTHON_IMAGE, 'python', '-I', '-B', '/script.py']
+                    '--env', 'OPENBLAS_NUM_THREADS=1', '--env', 'OMP_NUM_THREADS=1',
+                    '--workdir', '/tmp']
+            if self.owner:
+                args.extend(['--label', 'siteco.execution.owner=' + self.owner])
+            args.extend([self.image, 'python', '-I', '-B', '/script.py'])
             process = None
             try:
                 before_create = time.monotonic()

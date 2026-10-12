@@ -42,12 +42,25 @@ def test_csv_preserves_raw_fields_and_logical_record_sources(tmp_path):
     assert result == parse_document(path, 'text/csv', ParseLimits())
 
 
-@pytest.mark.parametrize('headers', [HEADERS[:-1], ('EAN',) + HEADERS[1:],
-                                    ('Order',) + HEADERS[1:], tuple(reversed(HEADERS))])
-def test_csv_rejects_wrong_header_instead_of_guessing(tmp_path, headers):
+@pytest.mark.parametrize('headers', [('', 'name'), ('name', 'name'), ('  ', 'name')])
+def test_csv_rejects_empty_or_duplicate_headers(tmp_path, headers):
     with pytest.raises(ParseError) as error:
-        parse_document(csv_file(tmp_path, [row()], headers), 'text/csv', ParseLimits())
+        parse_document(csv_file(tmp_path, [['a', 'b']], headers), 'text/csv', ParseLimits())
     assert error.value.code == 'csv_header_invalid'
+
+
+@pytest.mark.parametrize('delimiter', [',', ';', '\t'])
+@pytest.mark.parametrize('encoding', ['utf-8', 'utf-8-sig', 'utf-16'])
+def test_generic_csv_preserves_strings(tmp_path, delimiter, encoding):
+    path = tmp_path / 'generic.csv'
+    with path.open('w', encoding=encoding, newline='') as stream:
+        writer = csv.writer(stream, delimiter=delimiter)
+        writer.writerow(['identifier', 'value', 'note'])
+        writer.writerow(['0001', 'NA', 'a; b, c\ncontinued'])
+    parsed = parse_document(path, 'text/csv', ParseLimits())
+    assert parsed.headers == ('identifier', 'value', 'note')
+    assert parsed.records[0].raw_values == ('0001', 'NA', 'a; b, c\ncontinued')
+    assert parsed.warnings == ()
 
 
 @pytest.mark.parametrize('values', [row()[:-1], row() + ['extra']])
@@ -154,3 +167,37 @@ def test_csv_late_structure_failure_and_oversized_field_return_no_partial_result
     with pytest.raises(ParseError) as error:
         parse_document(csv_file(tmp_path, [values]), 'text/csv', ParseLimits())
     assert error.value.code == 'csv_unreadable'
+
+
+def test_reordered_siteco_columns_keep_exact_semantics(tmp_path):
+    headers = tuple(reversed(HEADERS))
+    values = tuple(reversed(row(' 001 ', '2.345,60')))
+    parsed = parse_document(csv_file(tmp_path, [values], headers), 'text/csv', ParseLimits())
+    assert parsed.records[0].order_id == '001'
+    assert parsed.records[0].price == Decimal('2345.60')
+    assert parsed.records[0].raw_values == values
+
+
+@pytest.mark.parametrize('raw,status,warning', [('1.234', 'invalid', 'price_unconfirmed'),
+                                               ('', 'missing', 'price_missing')])
+def test_generic_price_column_never_assumes_german_amounts(tmp_path, raw, status, warning):
+    parsed = parse_document(csv_file(tmp_path, [['001', raw]],
+                                    ('Bestellnummer', 'Listenpreis')), 'text/csv', ParseLimits())
+    assert parsed.records[0].price is None
+    assert parsed.records[0].price_status == status
+    assert parsed.records[0].raw_values == ('001', raw)
+    assert [w.code for w in parsed.warnings] == [warning]
+
+
+def test_quoted_header_delimiter_is_preserved(tmp_path):
+    parsed = parse_document(csv_file(tmp_path, [['0001', 'NA']],
+                                    ('identifier;external', 'marker')), 'text/csv', ParseLimits())
+    assert parsed.headers == ('identifier;external', 'marker')
+
+
+def test_ambiguous_header_delimiters_require_clarification(tmp_path):
+    path = tmp_path / 'ambiguous.csv'
+    path.write_text('a,b;c\n1,2;3\n', encoding='utf-8')
+    with pytest.raises(ParseError) as error:
+        parse_document(path, 'text/csv', ParseLimits())
+    assert error.value.code == 'csv_dialect_ambiguous'

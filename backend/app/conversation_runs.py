@@ -14,7 +14,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import Field, model_validator
 
-from app.agent_protocol import (DocumentVersion, ProtocolModel, ResolvedReference,
+from app.agent_protocol import (DocumentVersion, ExecutionBudget, ProtocolModel, ResolvedReference,
                                 ScopeSnapshot, TaskPackage, TaskResult, validate_result)
 from app.artifacts import ArtifactStore
 from app.documents import DocumentError
@@ -28,8 +28,9 @@ class PurposeChange(ProtocolModel):
 
 
 class Intent(ProtocolModel):
-    route: Literal['direct', 'pdf', 'csv', 'rules', 'clarification']
+    route: Literal['direct', 'pdf', 'csv', 'mixed', 'rules', 'clarification']
     objective: str = Field(min_length=1, max_length=8000)
+    pdf_mode: Literal['facts', 'coverage', 'topic'] = 'facts'
     purpose: str | None = None
     explicit_sources: tuple[DocumentVersion, ...] | None = None
     change_default: bool = False
@@ -65,10 +66,21 @@ purpose_changes. Do not change persistent rules without an explicit request.
 Null means no restriction/reset; an empty source list means explicitly no sources.
 Use purpose only for a clear task purpose, matching existing keys when applicable.
 Select pdf for document facts, direct only for greetings or non-document ordinary
-conversation, rules for scope-only changes, and csv for CSV analysis. Never answer
-document facts using direct_answer or old assistant history. PDF full-document
-summaries/comparisons require later capabilities: clarify the requested factual
-question instead. If a reference/source/instruction is materially ambiguous,
+conversation, rules for scope-only changes, and csv for CSV analysis. Use mixed
+for independent PDF facts and CSV calculations requested together. A request that
+needs PDF-derived entities to drive CSV calculation requires clarification into
+explicit identifiers; automatic dependent cross-specialist planning is not available.
+For follow-up filtering or chart styling, reference the relevant table/chart
+artifact from focus using kind=artifact and its exact reference_id. The trusted
+focus_artifact scope identifies its existing purpose. Preserve that purpose for
+follow-up table/chart operations unless the user explicitly requests another
+purpose; do not invent a new purpose label for ordinary CSV analysis. Never answer
+document facts using direct_answer or old assistant history. Set pdf_mode=facts
+for specific facts or deterministic numeric comparisons, coverage for full-document
+or page-range reading/summaries, topic for thematic analysis and multi-document
+attribute comparison. Preserve requested page ranges and comparison dimensions in
+the objective. Do not promise complete reading before seeing the coverage result.
+If a reference/source/instruction is materially ambiguous,
 return clarification with a concise user question and do not change rules.
 Respect caller_explicit_sources as a hard upper bound on this turn's sources.
 Produce no calculated CSV result yourself. Return JSON only.'''
@@ -82,6 +94,7 @@ class _State(TypedDict, total=False):
     answer: dict
     evidence: list[dict]
     specialist_clarification: str | None
+    task_ids: list[str]
 
 
 def _json(value):
@@ -109,12 +122,33 @@ class _RunModel:
         self.provider = getattr(delegate, 'provider', 'unknown')
         self.model = getattr(delegate, 'model', 'unknown')
 
+    def remaining_calls(self):
+        row = self.owner._row(self.run_id)
+        return max(0, 6 - (row['model_calls'] - row['model_budget_start']))
+
+    def has_receipt(self, system, payload, schema):
+        key = hashlib.sha256(_json([system, payload, schema]).encode()).hexdigest()
+        with self.owner._db() as db:
+            return db.execute('SELECT 1 FROM conversation_model_receipts WHERE run_id=? AND receipt_key=?',
+                              (self.run_id, key)).fetchone() is not None
+
     def generate(self, system, payload, schema, budget):
         budget.check()
+        receipt_key = (hashlib.sha256(_json([system, payload, schema]).encode()).hexdigest()
+                       if payload.get('phase', '').startswith(('csv', 'pdf_')) else None)
+        self.last_receipt_key = receipt_key
+        if receipt_key:
+            with self.owner._db() as db:
+                prior = db.execute('SELECT response FROM conversation_model_receipts WHERE run_id=? AND receipt_key=?',
+                                   (self.run_id, receipt_key)).fetchone()
+            if prior:
+                return json.loads(prior[0])
         with self.owner._db() as db:
             db.execute('BEGIN IMMEDIATE')
-            count = db.execute('SELECT model_calls FROM conversation_runs WHERE run_id=?', (self.run_id,)).fetchone()[0]
-            if count >= 6:
+            usage = db.execute('SELECT model_calls,model_budget_start FROM conversation_runs WHERE run_id=?',
+                               (self.run_id,)).fetchone()
+            count = usage['model_calls']
+            if count - usage['model_budget_start'] >= 6:
                 raise DocumentError('run_budget_exhausted', 'The run reached its model call budget.', 409)
             db.execute('UPDATE conversation_runs SET model_calls=model_calls+1 WHERE run_id=?', (self.run_id,))
             self.owner._event(db, self.run_id, f'model:{count}', 'developer', 'model_call',
@@ -122,13 +156,23 @@ class _RunModel:
         budget.check()
         result = self.delegate.generate(system, payload, schema, budget)
         budget.check()
+        if receipt_key:
+            with self.owner._db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                current = db.execute('SELECT stop_requested FROM conversation_runs WHERE run_id=?', (self.run_id,)).fetchone()
+                if current is None or current[0]:
+                    raise DocumentError('run_stopped', 'Run stopped.', 409)
+                db.execute('''INSERT OR IGNORE INTO conversation_model_receipts
+                    (run_id,receipt_key,response,task_id) VALUES (?,?,?,?)''',
+                           (self.run_id, receipt_key, _json(result), payload.get('task_id')))
         return result
 
 
 class ConversationRuns:
-    def __init__(self, database, bindings, specialist_factory, *, after_publish=None):
+    def __init__(self, database, bindings, specialist_factory, *, csv_specialist_factory=None, after_publish=None):
         self.database = Path(database)
         self.bindings, self.specialist_factory = bindings, specialist_factory
+        self.csv_specialist_factory = csv_specialist_factory
         self.sessions = SessionStore(database)
         self.artifacts = ArtifactStore(database)
         self.checkpoints = self.database.with_name('conversation-checkpoints.sqlite3')
@@ -146,6 +190,8 @@ class ConversationRuns:
                     stop_requested INTEGER NOT NULL DEFAULT 0,
                     replies TEXT NOT NULL DEFAULT '{}', clarification TEXT, clarification_index INTEGER,
                     answer TEXT, snapshot_id TEXT, error TEXT, model_calls INTEGER NOT NULL DEFAULT 0,
+                    model_budget_start INTEGER NOT NULL DEFAULT 0,
+                    failed_receipt_key TEXT,
                     UNIQUE(session_id,request_id));
                 CREATE TABLE IF NOT EXISTS conversation_events (
                     event_id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES conversation_runs(run_id) ON DELETE CASCADE,
@@ -156,7 +202,17 @@ class ConversationRuns:
                 CREATE TABLE IF NOT EXISTS conversation_tasks (
                     task_id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES conversation_runs(run_id) ON DELETE CASCADE,
                     task TEXT NOT NULL, result TEXT NOT NULL, output TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS conversation_model_receipts (
+                    run_id TEXT NOT NULL REFERENCES conversation_runs(run_id) ON DELETE CASCADE,
+                    receipt_key TEXT NOT NULL, response TEXT NOT NULL, task_id TEXT,
+                    PRIMARY KEY(run_id,receipt_key));
             ''')
+            if 'model_budget_start' not in {row['name'] for row in db.execute('PRAGMA table_info(conversation_runs)')}:
+                db.execute('ALTER TABLE conversation_runs ADD COLUMN model_budget_start INTEGER NOT NULL DEFAULT 0')
+            if 'failed_receipt_key' not in {row['name'] for row in db.execute('PRAGMA table_info(conversation_runs)')}:
+                db.execute('ALTER TABLE conversation_runs ADD COLUMN failed_receipt_key TEXT')
+            if 'task_id' not in {row['name'] for row in db.execute('PRAGMA table_info(conversation_model_receipts)')}:
+                db.execute('ALTER TABLE conversation_model_receipts ADD COLUMN task_id TEXT')
 
     @contextmanager
     def _db(self):
@@ -222,12 +278,16 @@ class ConversationRuns:
         source_available = None
         if answer is not None:
             source_available = self.artifacts.get(session_id, run_id + ':answer')['source_available']
+        with self._db() as db:
+            artifact_views = [dict(r) for r in db.execute(
+                'SELECT artifact_id,kind FROM artifact_records WHERE session_id=? AND snapshot_id=? ORDER BY rowid',
+                (row['session_id'], row['snapshot_id']))] if answer is not None else []
         return {'run_id': run_id, 'turn_id': row['turn_id'], 'session_id': session_id, 'request_id': row['request_id'],
                 'status': status, 'question': json.loads(row['request'])['question'],
                 'clarification': row['clarification'] if (row['clarification_index'] is not None
                     and str(row['clarification_index']) not in json.loads(row['replies'])) else None,
                 'answer': answer, 'source_available': source_available,
-                'artifact_ids': [run_id + ':answer'] if row['answer'] else [],
+                'artifact_ids': [item['artifact_id'] for item in artifact_views], 'artifacts': artifact_views,
                 'error': {'code': row['error'], 'message': 'The run could not finish. Review sources or settings, then resume.'}
                          if row['error'] else None,
                 'config_snapshot': json.loads(row['config'])}
@@ -338,7 +398,33 @@ class ConversationRuns:
                 replies[index] = reply
             elif row['clarification_index'] is not None and str(row['clarification_index']) not in replies:
                 raise DocumentError('clarification_required', 'Provide the requested clarification.', 422)
-            db.execute("UPDATE conversation_runs SET status='queued',stop_requested=0,error=NULL,replies=? WHERE run_id=?", (_json(replies), run_id))
+            failed_csv = [task['task_id'] for task in db.execute('''SELECT task_id FROM conversation_tasks
+                WHERE run_id=? AND json_extract(task,'$.specialist')='csv'
+                AND json_extract(result,'$.status')='failed' ''', (run_id,))]
+            invalid_receipt = None
+            if (row['error'] or '').startswith(('invalid_csv_', 'invalid_pdf_')) and row['failed_receipt_key']:
+                invalid_receipt = db.execute('''SELECT task_id FROM conversation_model_receipts
+                    WHERE run_id=? AND receipt_key=? AND task_id IS NOT NULL
+                    AND task_id NOT IN (SELECT task_id FROM conversation_tasks WHERE run_id=?)''',
+                    (run_id, row['failed_receipt_key'], run_id)).fetchone()
+                if invalid_receipt:
+                    # Keep the valid plan when only its later review was malformed.
+                    db.execute('DELETE FROM conversation_model_receipts WHERE run_id=? AND receipt_key=?',
+                               (run_id, row['failed_receipt_key']))
+            if failed_csv:
+                # Explicit resume grants a fresh bounded attempt. Successful task
+                # outputs and computations remain replayable; startup never does this.
+                for task_id in failed_csv:
+                    db.execute('DELETE FROM conversation_tasks WHERE task_id=?', (task_id,))
+                    db.execute('''DELETE FROM conversation_model_receipts WHERE run_id=?
+                        AND (task_id=? OR task_id IS NULL)''', (run_id, task_id))
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE name='execution_jobs'").fetchone():
+                        db.execute("DELETE FROM execution_jobs WHERE task_id=? AND status!='completed'", (task_id,))
+            if failed_csv or invalid_receipt:
+                db.execute('UPDATE conversation_runs SET model_budget_start=model_calls WHERE run_id=?', (run_id,))
+                self._event(db, run_id, f"specialist_retry:{row['model_calls']}", 'developer', 'retry',
+                            {'task_ids': failed_csv or [invalid_receipt['task_id']], 'model_call_baseline': row['model_calls']})
+            db.execute("UPDATE conversation_runs SET status='queued',stop_requested=0,error=NULL,failed_receipt_key=NULL,replies=? WHERE run_id=?", (_json(replies), run_id))
         self._bound[run_id] = service
         self._accepted.add(run_id)
         return self.inspect(session_id, run_id)
@@ -365,15 +451,31 @@ class ConversationRuns:
             # Intent receives targets and user requests, never old source facts.
             history = [{'role': item['role'], 'content': item['content']} for item in self.sessions.messages(sid)
                        if item['role'] == 'user'][-12:]
+            focus_artifact = None
+            if session['focus'] and session['focus']['kind'] in ('artifact', 'row_set'):
+                identity = session['focus']['reference_id']
+                try:
+                    item = self.artifacts.get(sid, identity)
+                    focus_artifact = {key: item[key] for key in
+                        ('artifact_id', 'kind', 'scope', 'source_available', 'invalidated')}
+                except DocumentError as error:
+                    if error.code != 'artifact_not_found':
+                        raise
+                    focus_artifact = {'artifact_id': identity, 'source_available': False}
             parsed = self._model(service, run_id, {'phase': 'intent', 'question': request['question'],
                 'clarifications': state.get('clarifications', []), 'catalog': catalog,
                 'rules': {'default_sources': session['default_sources'], 'purpose_sources': session['purpose_sources']},
-                'focus': session['focus'], 'history': history, 'caller_explicit_sources': request['explicit_sources'],
+                'focus': session['focus'], 'focus_artifact': focus_artifact,
+                'history': history, 'caller_explicit_sources': request['explicit_sources'],
                 'accepted_scope': state.get('snapshot', {}).get('scope'),
                 'scope_note': 'After specialist clarification, keep the accepted source scope; changed scope needs a new run.'}, budget)
-            if parsed.route == 'csv':
-                parsed = parsed.model_copy(update={'route': 'clarification',
-                    'clarification': 'CSV analysis is not available in this conversation yet. Please ask a PDF factual question.'})
+            if parsed.route in ('csv', 'mixed'):
+                purposes = {self.artifacts.get(sid, ref.reference_id)['scope']['purpose']
+                            for ref in parsed.references if ref.kind in ('artifact', 'row_set')}
+                if len(purposes) > 1:
+                    raise DocumentError('artifact_purpose_conflict', 'Referenced results have different purposes; clarify the intended scope.', 409)
+                if parsed.purpose is None and purposes:
+                    parsed = parsed.model_copy(update={'purpose': next(iter(purposes))})
             return {'intent': parsed.model_dump(mode='json'), 'specialist_clarification': None}
 
         def clarify(state):
@@ -445,41 +547,71 @@ class ConversationRuns:
                           'citations': [], 'calculations': [], 'gaps': [], 'warnings': []}
                 return {'answer': result, 'evidence': []}
             accepted_scope = ScopeSnapshot.model_validate_json(_json(state['snapshot']['scope']))
-            pdf_sources = tuple(ref for ref in accepted_scope.documents
-                                if self.bindings.documents.get(ref.version_id)['original_filename'].lower().endswith('.pdf'))
-            if not pdf_sources:
-                raise DocumentError('no_pdf_sources', 'Add an available PDF source for this request.', 409)
-            task = TaskPackage(session_id=sid, turn_id=row['turn_id'], run_id=run_id,
-                               task_id=run_id + ':pdf:' + str(len(state.get('clarifications', []))),
-                               objective=parsed.objective, specialist='pdf',
-                               scope=accepted_scope.model_copy(update={'documents': pdf_sources}),
-                               resolved_references=parsed.references)
-            encoded_task = task.model_dump_json()
-            with self._db() as db:
-                previous = db.execute('SELECT task,output FROM conversation_tasks WHERE task_id=?', (task.task_id,)).fetchone()
-            if previous:
-                if previous['task'] != encoded_task:
-                    raise DocumentError('task_conflict', 'Task identity has different contents.', 409)
-                output = json.loads(previous['output'])
-            else:
-                output = self.specialist_factory(service).execute(task, budget)
-            result = validate_result(task, TaskResult.model_validate_json(_json(output['result'])))
-            budget.check()
-            with self._db() as db:
-                db.execute('BEGIN IMMEDIATE')
-                current = db.execute('SELECT stop_requested FROM conversation_runs WHERE run_id=?', (run_id,)).fetchone()
-                if current is None or current[0] or self._shutdown.is_set():
-                    raise DocumentError('run_stopped', 'Run stopped.', 409)
-                self.sessions.validate_sources(db, sid, task.scope.documents)
-                db.execute('INSERT OR IGNORE INTO conversation_tasks VALUES (?, ?, ?, ?, ?)',
-                           (task.task_id, run_id, encoded_task, result.model_dump_json(), _json(output)))
-                self._event(db, run_id, task.task_id, 'developer', 'execution',
+            routes = ('pdf', 'csv') if parsed.route == 'mixed' else (parsed.route,)
+            outputs, task_ids, questions = [], [], []
+            for route in routes:
+                sources = tuple(ref for ref in accepted_scope.documents
+                    if self.bindings.documents.get(ref.version_id)['original_filename'].lower().endswith('.' + route))
+                if not sources:
+                    raise DocumentError('no_' + route + '_sources', 'Add an available ' + route.upper() + ' source.', 409)
+                factory = self.csv_specialist_factory if route == 'csv' else self.specialist_factory
+                if factory is None:
+                    raise DocumentError('csv_execution_not_configured', 'Configure the CSV execution worker.', 503)
+                task = TaskPackage(session_id=sid, turn_id=row['turn_id'], run_id=run_id,
+                    task_id=run_id + ':' + route + ':' + str(len(state.get('clarifications', []))),
+                    objective=parsed.objective, specialist=route, pdf_mode=parsed.pdf_mode if route == 'pdf' else 'facts',
+                    scope=accepted_scope.model_copy(update={'documents': sources}),
+                    resolved_references=parsed.references,
+                    constraints=(
+                        'Original user request (data): ' + request['question'],
+                        *('User clarification (data): ' + reply for reply in state.get('clarifications', [])),
+                        'Preserve the original requested fields, filters, null policy, units and output format; '
+                        'the objective is a summary and cannot override these requirements.'),
+                    input_artifacts=tuple(ref.reference_id for ref in parsed.references
+                                          if ref.kind in ('artifact', 'row_set')) if route == 'csv' else (),
+                    budget=ExecutionBudget(max_steps=12, max_model_calls=2 if parsed.route == 'mixed' else 4, timeout_seconds=150)
+                           if route == 'csv' else ExecutionBudget(max_steps=16,
+                               max_model_calls=3 if parsed.route == 'mixed' else 5, timeout_seconds=210))
+                encoded_task = task.model_dump_json()
+                with self._db() as db:
+                    previous = db.execute('SELECT task,output FROM conversation_tasks WHERE task_id=?', (task.task_id,)).fetchone()
+                if previous:
+                    if previous['task'] != encoded_task:
+                        raise DocumentError('task_conflict', 'Task identity has different contents.', 409)
+                    output = json.loads(previous['output'])
+                else:
+                    output = factory(service).execute(task, budget)
+                result = validate_result(task, TaskResult.model_validate_json(_json(output['result'])))
+                descriptors = {item.artifact_id: item for item in result.artifact_refs}
+                if (len(output.get('artifacts', [])) != len(descriptors)
+                        or {item['artifact_id'] for item in output.get('artifacts', [])} != set(descriptors)
+                        or any(item['kind'] != descriptors[item['artifact_id']].kind for item in output.get('artifacts', []))):
+                    raise DocumentError('invalid_specialist_artifacts', 'Specialist artifact identities do not match.', 502)
+                budget.check()
+                with self._db() as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    current = db.execute('SELECT stop_requested,model_budget_start FROM conversation_runs WHERE run_id=?', (run_id,)).fetchone()
+                    if current is None or current[0] or self._shutdown.is_set():
+                        raise DocumentError('run_stopped', 'Run stopped.', 409)
+                    self.sessions.validate_sources(db, sid, task.scope.documents)
+                    db.execute('INSERT OR IGNORE INTO conversation_tasks VALUES (?, ?, ?, ?, ?)',
+                               (task.task_id, run_id, encoded_task, result.model_dump_json(), _json(output)))
+                    if not previous:
+                        self._event(db, run_id, f"{task.task_id}:attempt:{current['model_budget_start']}", 'developer', 'execution',
                             {'task': task.model_dump(mode='json'), 'result': result.model_dump(mode='json'),
                              'diagnostics': output.get('diagnostics', {})})
-            if result.status == 'failed':
-                raise DocumentError('specialist_failed', 'The specialist could not complete this task.', 502)
-            return {'answer': output['answer'], 'evidence': output['evidence'],
-                    'specialist_clarification': result.clarification if result.status == 'clarification' else None}
+                if result.status == 'failed':
+                    raise DocumentError('specialist_failed', 'The specialist could not complete this task.', 502)
+                outputs.append(output)
+                task_ids.append(task.task_id)
+                if result.status == 'clarification':
+                    questions.append(result.clarification)
+            combined = {key: [item for output in outputs for item in output['answer'].get(key, [])]
+                        for key in ('segments', 'citations', 'calculations', 'gaps', 'warnings')}
+            combined['outcome'] = ('needs_clarification' if questions else
+                'answered' if all(output['answer']['outcome'] == 'answered' for output in outputs) else 'partial')
+            return {'answer': combined, 'evidence': [item for output in outputs for item in output['evidence']],
+                    'task_ids': task_ids, 'specialist_clarification': '\n'.join(questions) or None}
 
         def publish(state):
             budget.check()
@@ -493,17 +625,33 @@ class ConversationRuns:
                     raise DocumentError('run_stopped', 'Run stopped.', 409)
                 if db.execute('SELECT rule_version FROM sessions WHERE session_id=?', (sid,)).fetchone()[0] != snapshot['rule_version']:
                     raise DocumentError('session_version_conflict', 'Source rules changed before publication.', 409)
+                artifact_ids, table_ids = [], []
+                for task_id in state.get('task_ids', []):
+                    saved = db.execute('SELECT output,result FROM conversation_tasks WHERE task_id=? AND run_id=?',
+                                       (task_id, run_id)).fetchone()
+                    output = json.loads(saved['output'])
+                    descriptors = {item.artifact_id: item for item in TaskResult.model_validate_json(saved['result']).artifact_refs}
+                    for item in output.get('artifacts', []):
+                        self.artifacts.publish(sid, item['artifact_id'], snapshot['snapshot_id'],
+                            kind=item['kind'], payload=item['payload'], calculation=item.get('calculation'),
+                            unit=item.get('unit'), cache_key=item.get('cache_key'),
+                            scope=descriptors[item['artifact_id']].scope, db=db)
+                        artifact_ids.append(item['artifact_id'])
+                        if item['kind'] == 'table':
+                            table_ids.append(item['artifact_id'])
                 self.artifacts.publish(sid, run_id + ':answer', snapshot['snapshot_id'], kind='answer', payload=state['answer'], db=db)
                 self.sessions.append_message(sid, run_id + ':answer', 'assistant', text, scope_value.documents, db=db)
                 parsed = Intent.model_validate_json(_json(state['intent']))
-                focus = parsed.references[-1] if parsed.references else ResolvedReference(
-                    kind='artifact', reference_id=run_id + ':answer', description=parsed.objective)
+                focus = (ResolvedReference(kind='artifact', reference_id=table_ids[0], description=parsed.objective)
+                         if table_ids else parsed.references[-1] if parsed.references else ResolvedReference(
+                             kind='artifact', reference_id=run_id + ':answer', description=parsed.objective))
                 self.sessions.set_focus(sid, focus, db=db)
                 for evidence in state.get('evidence', []):
                     db.execute('INSERT OR IGNORE INTO conversation_evidence VALUES (?, ?, ?)',
                                (run_id, evidence['reference_id'], _json(evidence)))
                 db.execute("UPDATE conversation_runs SET status='completed',answer=?,error=NULL WHERE run_id=?", (_json(state['answer']), run_id))
-                self._event(db, run_id, 'answer', 'user', 'answer', {'message': text, 'artifact_ids': [run_id + ':answer']})
+                self._event(db, run_id, 'answer', 'user', 'answer',
+                            {'message': text, 'artifact_ids': [run_id + ':answer', *artifact_ids]})
             if self._after_publish:
                 self._after_publish()
             return {}
@@ -563,8 +711,10 @@ class ConversationRuns:
                     current = db.execute('SELECT status,stop_requested FROM conversation_runs WHERE run_id=?', (run_id,)).fetchone()
                     if current and current['status'] != 'completed':
                         stopped = current['stop_requested'] or code == 'run_stopped'
-                        db.execute('UPDATE conversation_runs SET status=?,error=? WHERE run_id=?',
-                                   ('stopped' if stopped else 'failed', None if stopped else code, run_id))
+                        failed_receipt = (getattr(service.model, 'last_receipt_key', None)
+                                          if code.startswith(('invalid_csv_', 'invalid_pdf_')) else None)
+                        db.execute('UPDATE conversation_runs SET status=?,error=?,failed_receipt_key=? WHERE run_id=?',
+                                   ('stopped' if stopped else 'failed', None if stopped else code, failed_receipt, run_id))
                         self._event(db, run_id, 'failure:' + str(uuid4()), 'developer', 'error', {'node': 'execution', 'code': code, 'type': type(error).__name__})
                         if not stopped:
                             self._event(db, run_id, 'error', 'user', 'error', {'message': 'The run could not finish. Review sources or settings, then resume.'})

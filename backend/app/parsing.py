@@ -58,6 +58,7 @@ class ParsedDocument:
     pages: tuple[PageResult, ...]
     warnings: tuple[ParseWarning, ...]
     parser_version: str = PARSER_VERSION
+    reading: dict | None = None
 
     @property
     def page_count(self):
@@ -125,7 +126,7 @@ def _page_evidence(regions, content_hash, number):
     return evidence, omitted
 
 
-def parse_document(stored_file: Path, media_type: str, limits: ParseLimits) -> ParsedDocument | ParsedCsvDocument:
+def parse_document(stored_file: Path, media_type: str, limits: ParseLimits, *, check=None) -> ParsedDocument | ParsedCsvDocument:
     if media_type == 'text/csv':
         from .csv_parsing import parse_csv
         return parse_csv(stored_file, limits.max_records)
@@ -154,14 +155,19 @@ def parse_document(stored_file: Path, media_type: str, limits: ParseLimits) -> P
                 raise ParseError('pdf_pages_unreadable', 'Cannot reliably enumerate PDF pages.') from None
             if len(pages) > limits.max_pages:
                 raise ParseError('pdf_page_limit', 'PDF exceeds the page limit.')
-            evidence, results, warnings = [], [], []
+            from .pdf_reading import READING_VERSION, reading_page
+            evidence, results, warnings, reading_pages = [], [], [], []
             for number, page in enumerate(pages, 1):
                 try:
+                    if check is not None:
+                        check()
                     text = (page.extract_text(layout=False) or '').strip()
                     if not text or not any(c.isalnum() for c in text):
+                        reading_pages.append(reading_page(number, '', page.bbox, content_hash.hexdigest(), 'no_text'))
                         results.append(PageResult(number, 'no_text'))
                         warnings.append(ParseWarning(number, 'no_usable_text', 'No usable native text; page skipped.'))
                         continue
+                    reading_pages.append(reading_page(number, text, page.bbox, content_hash.hexdigest()))
                     try:
                         regions, uncertain = group_page(page)
                     except Exception as exc:
@@ -171,6 +177,11 @@ def parse_document(stored_file: Path, media_type: str, limits: ParseLimits) -> P
                     if not regions:
                         regions = (Region((), (SourceSpan(text, tuple(page.bbox)),), 'fallback'),)
                         uncertain = True
+                    reading_pages[-1]['structure'] = [
+                        {'kind': region.kind,
+                         'headings': [{'text': s.text, 'bbox': list(s.bbox)} for s in region.header],
+                         'unit_count': len(region.units)} for region in regions]
+                    reading_pages[-1]['layout_uncertain'] = uncertain
                     chunks, omitted = _page_evidence(regions, content_hash.hexdigest(), number)
                     evidence.extend(chunks)
                     if omitted:
@@ -182,10 +193,33 @@ def parse_document(stored_file: Path, media_type: str, limits: ParseLimits) -> P
                 except Exception as exc:
                     if not _content_error(exc):
                         raise
+                    if not reading_pages or reading_pages[-1]['page_number'] != number:
+                        reading_pages.append({'page_number': number, 'status': 'failed', 'units': []})
                     results.append(PageResult(number, 'failed'))
                     warnings.append(ParseWarning(number, 'page_parse_failed', 'Native text extraction failed; page skipped.'))
                 finally:
                     page.close()
             if not evidence:
+                # Preserve existing v2 retrieval identities whenever any valid
+                # chunks exist. A wholly oversized native-text document instead
+                # gets bounded page-text fallback evidence, never an empty index.
+                for reading_page_result in reading_pages:
+                    for unit in reading_page_result['units']:
+                        locator = unit['locator']
+                        evidence.append(Evidence(unit['evidence_id'], unit['text'],
+                            locator['page_number'], tuple(locator['bbox']),
+                            retrieval_text=unit['text'],
+                            source_spans=(SourceSpan(unit['text'], tuple(locator['bbox'])),)))
+                if evidence:
+                    results = [PageResult(p.page_number, 'degraded') if p.status == 'failed'
+                               and reading_pages[p.page_number - 1]['units'] else p for p in results]
+                    warnings = [w for w in warnings if w.code != 'oversized_unit_skipped']
+                    warnings.extend(ParseWarning(p['page_number'], 'native_reading_fallback',
+                        'Oversized layout units use bounded native page text and page-level coordinates.')
+                        for p in reading_pages if p['units'])
+            if not evidence:
                 raise ParseError('no_usable_evidence', 'No usable native-text evidence was extracted.', pages=results, warnings=warnings)
-            return ParsedDocument(tuple(evidence), tuple(results), tuple(warnings))
+            reading = {'reading_version': READING_VERSION, 'content_hash': content_hash.hexdigest(), 'pages': reading_pages,
+                       'warnings': [{'code': 'native_reading_order', 'message':
+                           'Native page text uses page-level coordinates; layout relationships and reading order may be uncertain.'}]}
+            return ParsedDocument(tuple(evidence), tuple(results), tuple(warnings), reading=reading)

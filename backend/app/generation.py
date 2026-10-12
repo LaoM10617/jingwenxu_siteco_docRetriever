@@ -26,6 +26,9 @@ def wire_schema(schema):
                 continue
             if key == 'const':
                 result['enum'] = [item]
+            elif key == 'properties':
+                # Property names are user schema fields, not schema keywords.
+                result[key] = {name: visit(child) for name, child in item.items()}
             else:
                 result['anyOf' if key == 'oneOf' else key] = visit(item)
         if result.get('type') == 'object':

@@ -87,7 +87,7 @@ def test_capacity_and_processing_guard(tmp_path):
 
 def test_http_trash_failed_file_restore_and_clear(tmp_path):
     with TestClient(create_app(Settings(data_dir=tmp_path))) as client:
-        identity = client.post('/api/documents', files={'file': ('bad.csv', b'id\n1')}).json()['document_id']
+        identity = client.post('/api/documents', files={'file': ('bad.csv', b'id,id\n1,2')}).json()['document_id']
         terminal(client.app.state.documents, identity)
         before = client.get('/api/documents/' + identity).json()
         assert client.post(f'/api/documents/{identity}/trash').json()['status'] == 'trashed'

@@ -111,3 +111,28 @@ test('a stopped clarification still accepts its required reply on resume', async
   await expect(page.locator('.model-answer')).toBeVisible();
   expect(state.requests).toEqual([{path:'/api/sessions/s1/runs/r1/resume',body:{reply:'The new version'}}]);
 });
+
+test('CSV results paginate and numeric line charts preserve x spacing', async ({page}) => {
+  await mockGraph(page,[run('completed',{answer,artifacts:[
+    {artifact_id:'t1',kind:'table'},{artifact_id:'c1',kind:'chart'}]})]);
+  await page.route('**/api/sessions/s1/artifacts/**', async route => {
+    const url = new URL(route.request().url());
+    if(url.pathname.endsWith('/c1')) return route.fulfill({json:{payload:{
+      type:'line',x:'distance',y:'value',title:'Measured values',table_artifact_id:'t1'}}});
+    const offset=Number(url.searchParams.get('offset') || 0);
+    return route.fulfill({json:{columns:['distance','value'],
+      rows:offset ? [[101,4]] : [[1,1],[2,2],[100,3]],total:101,has_more:offset===0,unit:null}});
+  });
+  await page.goto('/');
+  await expect(page.getByText('101 result rows',{exact:true})).toBeVisible();
+  await expect(page.getByRole('img',{name:'Measured values'})).toBeVisible();
+  const points=await page.locator('polyline').getAttribute('points');
+  const xs=points.split(' ').map(p=>Number(p.split(',')[0]));
+  expect((xs[2]-xs[1])/(xs[1]-xs[0])).toBeCloseTo(98);
+  await expect(page.getByText('Chart preview shows the first 100 result rows. The complete result is in the table.')).toBeVisible();
+  await page.getByRole('button',{name:'Next rows',exact:true}).click();
+  await expect(page.getByRole('cell',{name:'101',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Next rows',exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'Previous rows',exact:true}).click();
+  await expect(page.getByRole('cell',{name:'100',exact:true})).toBeVisible();
+});

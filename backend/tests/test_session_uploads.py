@@ -6,6 +6,34 @@ from test_csv_lifecycle import contents, terminal
 from test_csv_parsing import row
 
 
+def test_csv_execution_snapshot_is_complete_versioned_and_session_scoped(tmp_path):
+    import pytest
+    from app.agent_protocol import DocumentVersion
+    from app.documents import DocumentError
+
+    with TestClient(create_app(Settings(data_dir=tmp_path))) as client:
+        documents, sessions = client.app.state.documents, client.app.state.sessions
+        sid = sessions.create()['session_id']
+        other = sessions.create()['session_id']
+        uploaded = client.post('/api/documents', params={'session_id': sid},
+            files={'file': ('prices.csv', contents([row(str(i).zfill(4), '1,25') for i in range(205)]).getvalue())}).json()
+        assert terminal(documents, uploaded['document_id'])['status'] == 'ready'
+        source = DocumentVersion(document_id=uploaded['logical_document_id'], version_id=uploaded['version_id'])
+        snapshot = documents.csv_snapshot(sid, (source,))
+        table = snapshot[0]
+        assert table['source'] == source.model_dump()
+        assert table['content_hash'] == documents.get(source.version_id)['content_hash']
+        assert len(table['rows']) == 205
+        assert table['rows'][0]['values'][0] == '0000'
+        assert table['rows'][-1]['values'][0] == '0204'
+        assert len({r['row_id'] for r in table['rows']}) == 205
+        with pytest.raises(DocumentError, match='available'):
+            documents.csv_snapshot(other, (source,))
+        sessions.remove(sid, source, expected_data_version=sessions.get(sid)['data_version'])
+        with pytest.raises(DocumentError, match='available'):
+            documents.csv_snapshot(sid, (source,))
+
+
 def test_delete_failure_remains_unavailable_and_retries_after_restart(tmp_path, monkeypatch):
     from pathlib import Path
     import pytest

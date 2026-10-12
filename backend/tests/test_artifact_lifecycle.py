@@ -1,8 +1,9 @@
 """Artifacts are historical records; reuse requires a current source snapshot."""
+import json
 import pytest
 
 from app.artifacts import ArtifactStore
-from app.agent_protocol import DocumentVersion
+from app.agent_protocol import DocumentVersion, ScopeSnapshot
 from app.documents import DocumentService, DocumentError
 from app.sessions import SessionStore
 from test_csv_lifecycle import contents, terminal
@@ -30,6 +31,31 @@ def snapshot(sessions, sid, request_id):
     current = sessions.get(sid)
     return sessions.snapshot(sid, request_id, expected_data_version=current['data_version'],
                              expected_rule_version=current['rule_version'])
+
+
+def test_specialist_scope_and_pagination_keep_only_actual_dependencies(workspace):
+    documents, sessions, artifacts, sid, original = workspace
+    other = documents.submit('other.csv', contents([row('002', '1,00')]), session_id=sid)
+    assert terminal(documents, other['document_id'])['status'] == 'ready'
+    snap = snapshot(sessions, sid, 'mixed')
+    accepted = ScopeSnapshot.model_validate_json(json.dumps(snap['scope']))
+    scope = accepted.model_copy(update={'documents': (DocumentVersion(document_id=original, version_id=original),)})
+    rows = [[str(i).zfill(3), i] for i in range(150)]
+    artifacts.publish(sid, 'table', snap['snapshot_id'], kind='table',
+        payload={'columns': ['id', 'value'], 'rows': rows}, scope=scope)
+    assert artifacts.page(sid, 'table')['rows'] == rows[:100]
+    assert artifacts.page(sid, 'table', 100)['rows'] == rows[100:]
+    assert not artifacts.page(sid, 'table', 100)['has_more']
+    documents.trash(other['document_id'])
+    documents.empty_trash()
+    assert artifacts.get(sid, 'table')['source_available']
+    outside = scope.model_copy(update={'documents': (DocumentVersion(document_id='outside', version_id='outside'),)})
+    with pytest.raises(DocumentError, match='accepted scope'):
+        artifacts.publish(sid, 'outside', snap['snapshot_id'], kind='table', payload={}, scope=outside)
+    documents.trash(original)
+    documents.empty_trash()
+    with pytest.raises(DocumentError, match='deleted with its source'):
+        artifacts.page(sid, 'table')
 
 
 def test_artifact_reuse_checks_current_sources_and_preserves_history(workspace):

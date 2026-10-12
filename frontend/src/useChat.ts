@@ -12,6 +12,7 @@ type Session = {session_id: string; data_version: number; rule_version: number; 
 type Submission = {request_id: string; question: string; expected_data_version: number;
   expected_rule_version: number; explicit_sources: Ref[] | null};
 export type Task = {run_id: string; session_id: string; request_id: string; question: string; status: string;
+  artifacts?: {artifact_id:string; kind:string}[];
   source_available?: boolean;
   clarification?: string | null; created_at?: number; answer: Answer | null;
   error: {code: string; message: string} | null};

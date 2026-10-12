@@ -1,4 +1,4 @@
-"""The explicitly supported price-list schema; no inference or model calls."""
+"""Lossless CSV records with optional SITECO price-list semantics."""
 import csv
 from dataclasses import dataclass
 from decimal import Decimal
@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 from typing import Literal
 
-CSV_PARSER_VERSION = 'price-list-v1'
+CSV_PARSER_VERSION = 'generic-csv-v2'
 PRICE_PATTERN = re.compile(r'[+-]?(?:[0-9]+|[0-9]{1,3}(?:\.[0-9]{3})+)(?:,[0-9]+)?')
 HEADERS = ('Bestellnummer', 'EAN', 'Kurzbezeichnung', 'Listenpreis', 'gültig ab',
            'Rabattgruppe', 'Familie', 'Leuchtenart', 'Rastertyp', 'Reflektortyp',
@@ -68,12 +68,29 @@ def parse_csv(stored_file: Path, max_records: int) -> ParsedCsvDocument:
         while block := binary.read(64 * 1024):
             digest.update(block)
         binary.seek(0)
-        with TextIOWrapper(binary, encoding='utf-8-sig', newline='') as stream:
+        encoding = 'utf-16' if binary.read(2) in (b'\xff\xfe', b'\xfe\xff') else 'utf-8-sig'
+        binary.seek(0)
+        with TextIOWrapper(binary, encoding=encoding, newline='') as stream:
             try:
-                reader = csv.reader(stream, delimiter=';', strict=True)
+                candidates = []
+                for delimiter in (';', ',', '\t'):
+                    stream.seek(0)
+                    try:
+                        header = tuple(next(csv.reader(stream, delimiter=delimiter, strict=True), ()))
+                    except csv.Error:
+                        continue
+                    if len(header) > 1:
+                        candidates.append(delimiter)
+                if len(candidates) > 1:
+                    raise ParseError('csv_dialect_ambiguous', 'CSV delimiter is ambiguous; use consistently quoted fields.')
+                stream.seek(0)
+                reader = csv.reader(stream, delimiter=candidates[0] if candidates else ',', strict=True)
                 headers = tuple(next(reader, ()))
-                if headers != HEADERS:
-                    raise ParseError('csv_header_invalid', 'CSV requires the supported price-list headers in order.')
+                if not headers or any(not h.strip() for h in headers) or len(set(headers)) != len(headers):
+                    raise ParseError('csv_header_invalid', 'CSV requires nonempty unique column names.')
+                order_index = headers.index('Bestellnummer') if 'Bestellnummer' in headers else None
+                price_index = headers.index('Listenpreis') if 'Listenpreis' in headers else None
+                siteco_prices = set(headers) == set(HEADERS)
                 records, warnings, seen_orders = [], [], set()
                 for values in reader:
                     if not values:
@@ -84,27 +101,37 @@ def parse_csv(stored_file: Path, max_records: int) -> ParsedCsvDocument:
                     if len(values) != len(headers):
                         raise ParseError('csv_record_invalid', 'CSV record has the wrong number of fields.')
                     identity = sha256(f'{digest.hexdigest()}\0{CSV_PARSER_VERSION}\0{number}'.encode()).hexdigest()
-                    order_id = values[0].strip()
-                    if not order_id:
+                    order_raw = values[order_index] if order_index is not None else ''
+                    order_id = order_raw.strip()
+                    if order_index is not None and not order_id:
                         warnings.append(CsvWarning(number, 'Bestellnummer', 'order_id_missing',
                                                    'Order ID is missing; record retained but not searchable by order.'))
-                    else:
-                        if order_id != values[0]:
+                    elif order_id:
+                        if order_id != order_raw:
                             warnings.append(CsvWarning(number, 'Bestellnummer', 'order_id_trimmed',
                                                        'Outer whitespace removed from the match key; original value retained.'))
                         if order_id in seen_orders:
                             warnings.append(CsvWarning(number, 'Bestellnummer', 'duplicate_order_id',
                                                        'Order ID repeats an earlier record; all sources retained.'))
                         seen_orders.add(order_id)
-                    price_status, price = _price(values[3])
-                    if price_status != 'valid':
+                    price_status, price = 'missing', None
+                    unconfirmed_price = False
+                    if price_index is not None:
+                        if siteco_prices:
+                            price_status, price = _price(values[price_index])
+                        elif values[price_index].strip():
+                            price_status, unconfirmed_price = 'invalid', True
+                    if unconfirmed_price:
+                        warnings.append(CsvWarning(number, 'Listenpreis', 'price_unconfirmed',
+                                                   'Price format is unconfirmed; clarify decimal and thousands separators before calculation.'))
+                    elif price_index is not None and price_status != 'valid':
                         warnings.append(CsvWarning(number, 'Listenpreis', f'price_{price_status}',
                                                    'Price is missing or invalid; original value retained, no numeric price available.'))
                     records.append(CsvRecord(identity, number, tuple(values), order_id, price_status, price))
                 if not records:
                     raise ParseError('csv_no_records', 'CSV contains no data records.')
             except UnicodeDecodeError:
-                raise ParseError('csv_encoding_invalid', 'CSV must be valid UTF-8.') from None
+                raise ParseError('csv_encoding_invalid', 'CSV must be valid UTF-8 or BOM-marked UTF-16.') from None
             except csv.Error:
                 raise ParseError('csv_unreadable', 'CSV quoting is invalid or a field exceeds the reader limit.') from None
     return ParsedCsvDocument(headers, tuple(records), tuple(warnings))

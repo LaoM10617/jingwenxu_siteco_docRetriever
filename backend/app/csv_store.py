@@ -6,6 +6,7 @@ import json
 import sqlite3
 
 from app.csv_parsing import CSV_PARSER_VERSION, HEADERS
+from app.csv_profile import profile
 
 
 def summary(parsed):
@@ -14,11 +15,15 @@ def summary(parsed):
             'indexed_record_count': sum(bool(r.order_id) for r in parsed.records),
             'price_counts': {s: sum(r.price_status == s for r in parsed.records)
                              for s in ('valid', 'missing', 'invalid')},
+            'profile': profile(parsed),
             'warnings': [asdict(w) for w in parsed.warnings]}
 
 
-def _digest(rows):
+def _digest(rows, headers=None):
     digest = sha256()
+    if headers is not None:
+        digest.update(json.dumps(tuple(headers), ensure_ascii=True).encode())
+        digest.update(b'\n')
     for row in rows:
         digest.update(json.dumps(tuple(row), ensure_ascii=True).encode())
         digest.update(b'\n')
@@ -54,7 +59,7 @@ class CsvStore:
                            ((document_id, *r) for r in rows))
             db.execute('INSERT INTO csv_documents VALUES (?,?,?,?,?)',
                        (document_id, parsed.parser_version, json.dumps(parsed.headers),
-                        len(rows), _digest(rows)))
+                        len(rows), _digest(rows, parsed.headers)))
 
     def restore(self, document_id, checkpoint):
         """Validate the complete durable snapshot without parsing or provider calls."""
@@ -63,15 +68,24 @@ class CsvStore:
             if meta is None:
                 return False
             rows = db.execute('SELECT record_number,evidence_id,order_id,raw_values,price_status,price FROM csv_records WHERE document_id=? ORDER BY record_number', (document_id,)).fetchall()
+            headers = json.loads(meta[1])
+            legacy = meta[0] == 'price-list-v1'
             if (not checkpoint or checkpoint.get('kind') != 'csv'
                     or checkpoint.get('parser_version') != meta[0]
                     or checkpoint.get('record_count') != len(rows)
                     or checkpoint.get('indexed_record_count') != sum(bool(r[2]) for r in rows)
                     or checkpoint.get('price_counts') != {s: sum(r[4] == s for r in rows) for s in ('valid', 'missing', 'invalid')}
-                    or meta[0] != CSV_PARSER_VERSION or tuple(json.loads(meta[1])) != HEADERS
-                    or len(rows) != meta[2] or not rows or not any(r[2] for r in rows)
+                    or meta[0] not in (CSV_PARSER_VERSION, 'price-list-v1')
+                    or not isinstance(headers, list) or not headers
+                    or any(not isinstance(h, str) or not h.strip() for h in headers)
+                    or len(set(headers)) != len(headers)
+                    or (legacy and tuple(headers) != HEADERS)
+                    or any(not isinstance(json.loads(r[3]), list)
+                           or len(json.loads(r[3])) != len(headers)
+                           or any(not isinstance(v, str) for v in json.loads(r[3])) for r in rows)
+                    or len(rows) != meta[2] or not rows
                     or [r[0] for r in rows] != list(range(1, len(rows) + 1))
-                    or _digest(rows) != meta[3]):
+                    or _digest(rows, None if legacy else headers) != meta[3]):
                 raise ValueError('Incomplete CSV snapshot')
         return True
 

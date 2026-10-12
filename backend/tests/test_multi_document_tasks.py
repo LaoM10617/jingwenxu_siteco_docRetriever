@@ -1,4 +1,4 @@
-"""M3.1 selected scope through upload, task HTTP, citations and frozen CSV paging."""
+"""Retained evidence preparation: selected scope, citations and exact CSV lookup."""
 import time
 from copy import deepcopy
 
@@ -10,7 +10,7 @@ from app.processing import DocumentProcessor
 from test_app import settings_for
 from test_parsing import pdf_file
 from test_pdf_publication import Gateway
-from test_question_tasks import csv_bytes
+from document_test_helpers import csv_bytes
 from test_csv_parsing import row
 
 
@@ -57,17 +57,10 @@ def upload(client, name, content):
 
 
 def finish(client, body):
-    submitted = client.post('/api/questions', json=body)
-    assert submitted.status_code == 202, submitted.json()
-    identity = submitted.json()['question_id']
-    for _ in range(250):
-        task = client.get('/api/questions/' + identity,
-                          params={'conversation_id': body['conversation_id']}).json()
-        if task['status'] in ('completed', 'failed'):
-            assert task['status'] == 'completed', task.get('error')
-            return task
-        time.sleep(.02)
-    pytest.fail('Question did not complete')
+    # Exercise the retained evidence/answer seam, independently of retired HTTP jobs.
+    request = {k: v for k, v in body.items() if k != 'request_id'}
+    answer = client.app.state.bindings.answers().answer(request, on_wait=lambda: None, on_stage=lambda stage: None)
+    return {'document_ids': body['document_ids'], 'answer': answer}
 
 
 @pytest.mark.parametrize('duplicate', [False, True])
@@ -100,13 +93,12 @@ def test_multi_document_scope_preserves_duplicates_and_excludes_unselected(tmp_p
             index = next(i for i, t in enumerate(answer['tool_results']) if t['tool'] == 'lookup_orders')
             # A later question changes scope; old task paging must still use its original two CSVs.
             finish(client, {**body, 'conversation_id': 'second', 'document_ids': [outside]})
-            pages = [client.get(f"/api/questions/{task['question_id']}/csv/{index}", params={
-                'conversation_id': 'first', 'offset': offset, 'limit': 1}).json() for offset in (0, 1)]
+            pages = [client.app.state.documents.lookup_orders(['001'], csvs, offset=offset, limit=1)
+                     for offset in (0, 1)]
             assert [p['total'] for p in pages] == [2, 2]
             assert {p['records'][0]['document_id'] for p in pages} == set(csvs)
             assert sorted(p['records'][0]['price'] for p in pages) == (['12.50', '12.50'] if duplicate else ['12.50', '25.00'])
-        assert client.get('/api/questions/' + task['question_id'],
-                          params={'conversation_id': 'second'}).status_code == 404
+
 
 
 @pytest.mark.parametrize('unavailable', ['unknown', 'processing'])
@@ -126,11 +118,11 @@ def test_entire_mixed_scope_is_rejected_before_provider_calls(tmp_path, unavaila
             assert gateway.entered.wait(2)
         try:
             calls = list(gateway.calls)
-            response = client.post('/api/questions', json={'conversation_id': 'a', 'request_id': 'r',
-                'question': 'AB-123 power and price 001?', 'document_ids': [ready_csv, identity]})
-            assert response.status_code == (404 if unavailable == 'unknown' else 409)
-            assert response.json()['error']['code'] == ('document_not_found' if unavailable == 'unknown'
-                                                       else 'document_not_ready')
+            from app.documents import DocumentError
+            with pytest.raises(DocumentError) as error:
+                finish(client, {'conversation_id': 'a', 'request_id': 'r',
+                    'question': 'AB-123 power and price 001?', 'document_ids': [ready_csv, identity]})
+            assert error.value.code == ('document_not_found' if unavailable == 'unknown' else 'document_not_ready')
             assert model.payloads == []
             assert gateway.calls == calls
         finally:
@@ -153,17 +145,10 @@ def test_mixed_plan_cannot_narrow_either_selected_document_type(tmp_path, route)
         scope = [upload(client, 'same.pdf', content) for _ in range(2)]
         scope += [upload(client, 'same.csv', csv_bytes([row('001')])) for _ in range(2)]
         calls = list(gateway.calls)
-        submitted = client.post('/api/questions', json={'conversation_id':'a','request_id':'r',
-            'question':'AB-123 power and price 001?', 'document_ids':scope})
-        assert submitted.status_code == 202
-        for _ in range(250):
-            task = client.get('/api/questions/' + submitted.json()['question_id'],
-                              params={'conversation_id':'a'}).json()
-            if task['status'] in ('completed', 'failed'):
-                break
-            time.sleep(.02)
-        assert task['status'] == 'failed'
-        assert task['error']['code'] == 'invalid_tool_plan'
-        assert task['answer'] is None
+        from app.documents import DocumentError
+        with pytest.raises(DocumentError) as error:
+            finish(client, {'conversation_id':'a','request_id':'r',
+                'question':'AB-123 power and price 001?', 'document_ids':scope})
+        assert error.value.code == 'invalid_tool_plan'
         assert gateway.calls == calls
         assert [p['phase'] for p in model.payloads] == ['plan']

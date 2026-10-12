@@ -27,11 +27,12 @@ from app.voyage import configured_gateway
 from app.questions import QuestionTools
 from app.answers import AnswerService
 from app.generation import StructuredModel
-from app.question_tasks import QuestionTasks, router as question_router
 from app.conversation_runs import ConversationRuns
 from app.pdf_specialist import PdfSpecialist
 from app.run_api import router as run_router, developer_router
 from app.run_cleanup import retry_purges
+from app.execution_jobs import ExecutionJobs
+from app.execution_api import router as execution_router
 
 VERSION = "0.1.0"
 
@@ -80,9 +81,15 @@ def create_app(settings: Settings | None = None, *, processor=None, model=None) 
             app.state.answers = bindings.answers()
             app.state.retriever = app.state.answers.tools.retriever
             await run_in_threadpool(app.state.documents.start, processor if processor is not None else DocumentProcessor())
-            app.state.questions = QuestionTasks(configuration.data_dir / 'app.sqlite3', app.state.answers,
-                                                answer_factory=bindings.answers)
-            app.state.runs = ConversationRuns(app.state.documents.database, bindings, PdfSpecialist)
+            app.state.execution_jobs = ExecutionJobs(app.state.documents.database,
+                                                    expected_image=configuration.execution_image)
+            def csv_specialist(service):
+                if not configuration.execution_image or not configuration.execution_worker_token:
+                    raise DocumentError('csv_execution_not_configured', 'Configure the CSV execution worker and image.', 503)
+                from app.csv_specialist import CsvSpecialist
+                return CsvSpecialist(service, app.state.execution_jobs, app.state.artifacts)
+            app.state.runs = ConversationRuns(app.state.documents.database, bindings, PdfSpecialist,
+                                             csv_specialist_factory=csv_specialist)
             retry_purges(app.state.runs)
             app.state.run_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='conversation')
             app.state.run_schedule_lock = Lock()
@@ -94,7 +101,6 @@ def create_app(settings: Settings | None = None, *, processor=None, model=None) 
         finally:
             app.state.runs.shutdown()
             await run_in_threadpool(app.state.run_executor.shutdown, wait=True)
-            await run_in_threadpool(app.state.questions.stop)
             await run_in_threadpool(app.state.documents.stop)
 
     app = FastAPI(title="SITECO Document Retriever", version=VERSION, lifespan=lifespan)
@@ -110,9 +116,9 @@ def create_app(settings: Settings | None = None, *, processor=None, model=None) 
     app.include_router(settings_router)
     app.include_router(router)
     app.include_router(session_router)
-    app.include_router(question_router)
     app.include_router(run_router)
     app.include_router(developer_router)
+    app.include_router(execution_router)
 
     @app.exception_handler(DocumentError)
     async def document_error(request, exc):

@@ -49,6 +49,7 @@ class TaskPackage(TaskIdentity):
     protocol_version: Literal[1] = 1
     objective: Annotated[str, Field(min_length=1)]
     specialist: Literal['pdf', 'csv']
+    pdf_mode: Literal['facts', 'coverage', 'topic'] = 'facts'
     scope: ScopeSnapshot
     resolved_references: tuple[ResolvedReference, ...] = ()
     input_artifacts: tuple[Identifier, ...] = ()

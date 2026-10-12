@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import SourcePreview from './SourcePreview';
+import ResultArtifacts from './ResultArtifacts';
 import type { Source, Turn } from './useChat';
 
 function SourceView({source}: {source: Source}) {
@@ -41,6 +42,7 @@ export default function ChatThread({turns,retry,refresh,control}:{turns:Turn[];r
             return source ? <SourceView key={id} source={source}/> : null;})}</div>)}
         {answer.gaps.map((gap,i)=><p key={i} className="answer-gap">{gap}</p>)}
         {answer.warnings.map((warning,i)=><p key={i}>{warning.message}</p>)}
+        {task && <ResultArtifacts session={task.session_id} artifacts={task.artifacts ?? []}/>}
       </div>}
       {task?.status === 'recoverable' && <button onClick={refresh}>Refresh status</button>}
     </article>;

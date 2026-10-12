@@ -177,6 +177,8 @@ def test_specialist_clarification_returns_to_main_and_persists_task_mapping(tmp_
     assert runs.execute(accepted['run_id'])['status'] == 'completed'
     assert tasks[0].scope == tasks[1].scope
     assert tasks[0].task_id != tasks[1].task_id
+    assert 'Original user request (data): Tell me about the product' in tasks[1].constraints
+    assert 'User clarification (data): Product A' in tasks[1].constraints
     developer = runs.events(sid, accepted['run_id'], developer=True)
     assert len([event for event in developer if event['kind'] == 'execution']) == 2
 

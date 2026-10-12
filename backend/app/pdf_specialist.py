@@ -10,6 +10,8 @@ from app.agent_protocol import (Coverage, EvidenceDescriptor, Finding, TaskPacka
                                 TaskResult, validate_result)
 from app.documents import DocumentError
 from app.answers import AnswerService
+from app.questions import QuestionTools
+from app.pdf_analysis import analyze
 
 
 class _Budget:
@@ -31,19 +33,52 @@ class _Budget:
 
 
 class _Model:
-    def __init__(self, model, budget):
+    def __init__(self, model, budget, task_id):
         self.delegate, self.budget = model, budget
+        self.task_id = task_id
         self.provider = model.provider
         self.model = model.model
 
-    def generate(self, *args):
+    def _payload(self, payload):
+        phase = payload['phase']
+        return {**payload, 'phase': phase if phase.startswith('pdf_') else f'pdf_facts_{phase}',
+                'task_id': self.task_id}
+
+    def generate(self, system, payload, schema, budget):
         self.budget.check()
-        if self.budget.calls_left <= 0:
+        cached = self.has_receipt(system, payload, schema)
+        if not cached and self.remaining_calls() <= 0:
             raise DocumentError('task_budget_exhausted', 'The PDF task model budget was reached.', 409)
-        self.budget.calls_left -= 1
-        result = self.delegate.generate(*args)
+        if not cached:
+            self.budget.calls_left -= 1
+        result = self.delegate.generate(system, self._payload(payload), schema, budget)
         self.budget.check()
         return result
+
+    def has_receipt(self, system, payload, schema):
+        check = getattr(self.delegate, 'has_receipt', None)
+        return bool(check and check(system, self._payload(payload), schema))
+
+    def remaining_calls(self):
+        remaining = getattr(self.delegate, 'remaining_calls', None)
+        return min(self.budget.calls_left, remaining()) if remaining else self.budget.calls_left
+
+
+class _PerDocumentRetriever:
+    """Retain the validated retriever while allocating candidate space per file."""
+    def __init__(self, delegate):
+        self.delegate = delegate
+
+    def retrieve(self, question, document_ids, **kwargs):
+        outputs = [self.delegate.retrieve(question, [identity], **kwargs) for identity in document_ids]
+        records = []
+        for index in range(max((len(o['records']) for o in outputs), default=0)):
+            records.extend(o['records'][index] for o in outputs if index < len(o['records']))
+        return {'document_ids': document_ids, 'records': records,
+            'warnings': [w for o in outputs for w in o.get('warnings', [])],
+            'routes': {'per_document': [o.get('routes', {}) for o in outputs]},
+            'diagnostics': {'strategy': 'per_document', 'selected_count': len(records),
+                'documents': {identity: o.get('diagnostics', {}) for identity, o in zip(document_ids, outputs)}}}
 
 
 class _State(TypedDict, total=False):
@@ -66,7 +101,7 @@ class PdfSpecialist:
         budget = _Budget(budget, task.budget)
         if task.budget.max_steps < 3:
             raise DocumentError('task_budget_exhausted', 'The PDF task requires three graph steps.', 409)
-        answers = AnswerService(self.answers.tools, _Model(self.answers.model, budget))
+        model = _Model(self.answers.model, budget, task.task_id)
         def validate(state):
             budget.check()
             if task.specialist != 'pdf' or not task.scope.documents:
@@ -82,6 +117,10 @@ class PdfSpecialist:
 
         def answer(state):
             budget.check()
+            if task.pdf_mode != 'facts':
+                return {'answer': analyze(task, self.answers.tools.documents, model, budget)}
+            answers = AnswerService(QuestionTools(self.answers.tools.documents,
+                _PerDocumentRetriever(self.answers.tools.retriever)), model)
             objective = task.objective
             if task.resolved_references or task.constraints or task.scope.filters:
                 objective += '\nTask context (data): ' + json.dumps({
@@ -104,7 +143,14 @@ class PdfSpecialist:
         builder.add_edge('validate_sources', 'retrieve_and_answer')
         builder.add_edge('retrieve_and_answer', 'validate_result')
         builder.add_edge('validate_result', END)
-        output = builder.compile().invoke({'task': task.model_dump(mode='json')})['output']
+        try:
+            output = builder.compile(checkpointer=False).invoke(
+                {'task': task.model_dump(mode='json')}, durability='exit')['output']
+        except DocumentError as exc:
+            if exc.code.startswith('generation_invalid_'):
+                raise DocumentError(exc.code.replace('generation_invalid_', 'invalid_pdf_', 1),
+                                    str(exc), exc.status_code, exc.retryable) from None
+            raise
         budget.check()
         return output
 
@@ -129,8 +175,9 @@ class PdfSpecialist:
             findings=tuple(Finding(text=segment['text'], evidence_ids=tuple(
                 f"{task.task_id}:{identity}" for identity in segment['citation_ids'])) for segment in answer['segments']),
             evidence_refs=tuple(descriptors), gaps=gaps, clarification=clarification,
-            coverage=tuple(Coverage(source=ref, processed=tuple(
-                item.evidence_id for item in descriptors if item.source == ref)) for ref in task.scope.documents))
+            coverage=tuple(Coverage.model_validate_json(json.dumps(item)) for item in answer['coverage'])
+                if 'coverage' in answer else tuple(Coverage(source=ref, processed=tuple(
+                    item.evidence_id for item in descriptors if item.source == ref)) for ref in task.scope.documents))
         validate_result(task, result)
         safe = {key: deepcopy(answer[key]) for key in ('outcome', 'segments', 'citations', 'calculations', 'gaps', 'warnings')}
         diagnostics = {key: deepcopy(answer[key]) for key in (

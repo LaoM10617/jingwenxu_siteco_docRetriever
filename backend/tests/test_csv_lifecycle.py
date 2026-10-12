@@ -148,12 +148,8 @@ def test_scope_is_all_or_error_and_missing_fields_do_not_become_zero(service):
         service.lookup_orders(['001'], [doc, 'unknown'])
     assert error.value.code == 'document_not_found'
     missing = service.submit('empty-keys.csv', contents([row('', 'bad')]))['document_id']
-    failed = terminal(service, missing)
-    assert failed['error']['code'] == 'csv_no_order_ids'
-    assert failed['parse_result']['record_count'] == 1
-    with pytest.raises(DocumentError) as error:
-        service.lookup_orders(['001'], [doc, missing])
-    assert error.value.code == 'document_not_ready'
+    assert terminal(service, missing)['status'] == 'ready'
+    assert service.lookup_orders(['001'], [missing])['total'] == 0
 
 
 def test_staged_records_are_hidden_failure_isolated_retry_does_not_duplicate(service, monkeypatch):
@@ -213,6 +209,7 @@ def test_stop_prevents_staged_csv_publication(tmp_path, monkeypatch):
     'DELETE FROM csv_records',
     "UPDATE csv_records SET price='999'",
     'DELETE FROM csv_documents',
+    "UPDATE csv_documents SET headers=replace(headers, 'EAN', 'sku')",
     'DELETE FROM document_parses',
     "UPDATE document_parses SET payload='{}'",
 ])
@@ -248,7 +245,7 @@ def test_csv_http_summary_and_record_evidence(tmp_path):
         doc = response.json()['document_id']
         assert terminal(app.state.documents, doc)['status'] == 'ready'
         status = client.get(f'/api/documents/{doc}').json()
-        assert status['parsing'] == {'kind': 'csv', 'parser_version': 'price-list-v1',
+        assert {k: v for k, v in status['parsing'].items() if k != 'profile'} == {'kind': 'csv', 'parser_version': 'generic-csv-v2',
             'record_count': 2, 'indexed_record_count': 2,
             'price_counts': {'valid': 0, 'missing': 1, 'invalid': 1}}
         assert status['warnings'][0]['record_number'] == 1
@@ -274,3 +271,34 @@ def test_ready_non_csv_scope_rejected(tmp_path):
         assert error.value.code == 'document_not_csv'
     finally:
         service.stop()
+
+
+def test_generic_csv_profile_and_restart_preserve_full_evidence(tmp_path):
+    service = DocumentService(tmp_path)
+    service.start()
+    document_id = service.submit('generic.csv', BytesIO(
+        b'id,count,amount,date,marker\n0001,2,1.234,2026-01-02,NA\n0002,3,2.345,2026-02-03,NULL\n0003,,3.456,2026-03-04, \n'))['document_id']
+    try:
+        ready = terminal(service, document_id)
+        assert ready['status'] == 'ready', ready['error']
+        columns = ready['parse_result']['profile']['columns']
+        assert columns[0]['type_candidate'] == 'string'
+        assert columns[1]['type_candidate'] == 'integer'
+        assert columns[1]['blank_count'] == 1
+        assert columns[2]['requires_clarification'] is True
+        assert columns[3]['type_candidate'] == 'date'
+        assert columns[4]['blank_count'] == 1
+        assert columns[4]['distinct_count'] == 3
+        assert columns[4]['examples'] == ['NA', 'NULL', ' ']
+        evidence = service.read_evidence(document_id)
+        assert len(evidence) == 3
+    finally:
+        service.stop()
+    restored = DocumentService(tmp_path)
+    restored.start()
+    try:
+        assert restored.get(document_id)['status'] == 'ready'
+        assert restored.read_evidence(document_id) == evidence
+        assert restored.get(document_id)['parse_result']['profile']['columns'] == columns
+    finally:
+        restored.stop()

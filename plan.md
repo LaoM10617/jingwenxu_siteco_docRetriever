@@ -1,16 +1,16 @@
 # Agent 产品化升级实施计划
 
-日期：2026-10-12。状态：A–C 已完成实施、验证和审查；本轮停在 C，D–G 未开始。
+日期：2026-10-12。状态：A–D 已完成各自既定范围的实现、测试、真实验证与审查；E 尚未开始。本轮停在 D，未部署到旧运行容器、未 commit/push。
 
 ## 1. 使用方式与授权
 
 先读 AGENTS.md 和 decisions-design.md。本文件只安排执行、测试和交接，设计含义以 decisions-design.md 为准。后续更新当前进度，不将计划项标成完成事实；过长时拆阶段 Log 并保留链接。
 
-原计划授权 A–C；用户先要求仅执行 A，A 交接后新增“接下来请你执行阶段B”。用户随后明确“请你直接推进实施阶段C”；当前范围为 C，完成后交接，不自动进入 D。允许按需子 Agent、既定设计内自主实现修复和小规模真实 API 验证。commit/push 等用户主动要求。影响或风险较大的新增依赖、框架及部署方案按 AGENTS.md 先讨论；SQLite 分库与幂等重放、宿主独立 Docker 控制程序的决定见 decisions-design.md 第 14 节。
+用户最新要求逐步完成 D、E，本轮先实施 D。允许按需子 Agent、既定设计内自主实现修复和小规模真实 API 验证。commit/push 等用户主动要求。影响或风险较大的新增依赖、框架及部署方案按 AGENTS.md 先讨论；用户已确认宿主 worker 主动领取、隔离 pandas 执行与 CSV 子图按需 review，现已落地。SQLite 分库与幂等恢复不变，后端及执行容器均不挂 Docker socket。设计见 decisions-design.md 第 14、17 节。
 
 本轮没有要求创建新对话或发送消息。旧项目不访问、不修改。
 
-## 2. 当前代码基线与复用策略
+## 2. 计划起始基线与复用策略（历史）
 
 - 分支 main，计划编写时 HEAD 为 269d5fe。接手必须重新检查 Git 状态。
 - 保留并适配 PDF 文本提取、页码/bbox/source_spans、预览、向量与词法检索、RRF 和 reranking。
@@ -124,6 +124,8 @@
 
 依赖：A 的执行器/协议、B 的资料范围、C 的主图接口。
 
+当前：D 已完成既定范围。Windows / Linux 最终全量各 471 passed、15 skipped、10 subtests passed；15 项 Docker 隔离及 pandas 测试另行真实通过，浏览器 9 passed，前端构建通过。真实 Gemini → 主图/CSV 图 → 宿主 worker → 隔离 pandas 的全表计算、无重算改图、旧结果再筛选三轮通过，worker 强杀/停止/回传丢失验证通过；双轴审查无未解决阻塞项。细节及限制见 [stage-d-log.md](stage-d-log.md)，设计见第 17 节。未部署旧运行容器。
+
 - 通用化解析与存储：原始值、稳定行标识、类型推断与用户澄清；保留编号前导零、德式价格、日期与缺失值语义。
 - 数据概览与字段语义；语义定位明确区分候选行和完整计算总体。
 - 实现分析计划、Python 生成、受控执行、结果校验与有限修正循环；业务口径不明确返回主 Agent 澄清。
@@ -136,6 +138,8 @@
 ## 9. 阶段 E：PDF 阅读与专题分析
 
 依赖：B–C。可在共享接口稳定后与 D 部分并行。
+
+当前：E 既定范围已完成。Windows/Linux 全量各 506 passed、15 skipped、10 subtests passed；最后覆盖守卫两端另各 33 passed，前端构建通过。真实摘要及双 PDF 明确比较/原页预览已验证，最终比较如实返回语义 partial；双轴审查阻塞项已关闭。保持单轮 6 次模型调用，设计见第 18 节，完整证据与限制见 [stage-e-log.md](stage-e-log.md)。未部署旧容器。
 
 - 建立按页面/阅读单元读取的完整内容表示和文档结构，避免仅以检索片段充当全文。
 - 实现事实检索、覆盖阅读、专题分析三路径；独立记录机械覆盖与语义充分性。
@@ -182,10 +186,10 @@ UI 视觉重构与开发者标签页属于后续产品阶段。当前旧 UI 能�
 
 ## 14. 当前交接快照
 
-- A/B/C 均已完成既定范围的实施、验证与审查。当前用户授权 C，按计划停在 C，D–G 未开始。分阶段证据见 stage-a-log.md、stage-b-log.md、[stage-c-log.md](stage-c-log.md)。
-- 当前 main / 269d5fe，无 commit/push；全部 A–C 工作尚未提交，AGENTS.md 仍被 Git 忽略且已读。详细未提交范围见 C Log。
-- 新页面和 `/api/sessions/{sid}/runs` 已接主图/PDF图，支持来源规则、追问、澄清、停止、显式恢复和持久回答。旧 `/api/questions` 仅保留 CSV 精确／混合／分页短期兼容，D 接入完整 CSV 后退役；新会话不使用旧 TTL 或旧 worker。
-- Linux 最终 437 passed、11 skipped、10 subtests passed；Windows 全量 436 passed 后新增规则事务用例随最后定向 15 passed；前端构建通过，浏览器新图及设置 8 passed。11 个执行器 Docker 用例本阶段未重跑，A 已独立实测。
+- A/B/C/D/E 均已完成既定范围的实施、验证与审查；F–G 未开始。分阶段证据见 stage-a-log.md、stage-b-log.md、[stage-c-log.md](stage-c-log.md)、[stage-d-log.md](stage-d-log.md)、[stage-e-log.md](stage-e-log.md)。
+- 本轮接手实测 main / e389512，HEAD 与本地 origin/main 一致，初始工作区干净。用户确认该提交已推送；本轮未执行 fetch、commit 或 push。只有 AGENTS.md 被 Git 忽略；设计、计划及 C 日志均已跟踪。旧记录的未提交状态仅代表当时交接。
+- 新页面和 `/api/sessions/{sid}/runs` 已接主图/PDF/CSV 图，支持来源规则、追问、澄清、停止、显式恢复、持久回答和结果表/图。旧 `/api/questions`、question_tasks.py 与旧 TTL memory 已退役；有效检索和确定性计算模块保留。
+- D 最终 Windows / Linux 全量各 471 passed、15 skipped、10 subtests passed；15 项 Docker 用例另行实测通过。前端构建通过，浏览器新图、产物及设置 9 passed。LangGraph 1.2.14 临时子图 durability 提示及兼容处理见 D Log。
 - 用户明确授权一次具体 PDF + Gemini/Voyage 实测，真实 HTTP 到图到引用回答通过；3 页引用已渲染核对。Groq、本阶段 rerank 未实测。记录在 data/stage-c/20261012T145256771671Z/receipt.json，原 4 份文件摘要未变。
 - 原 Docker 前后端继续 healthy，未部署新代码或迁移其 data/docker-e2e；独立验证副本、阶段 C 测试镜像和配置项见 C Log。临时服务已停止。
-- 下一步 D 从 decisions-design.md 第 16 节与 C Log 接手，明确通用 CSV 及 Python 执行器接入；不能自行挂 Docker socket。页面视觉改版、开发者标签页、完整 PDF 阅读和长会话策略仍按后续计划安排。
+- D 全部变更仍未提交：通用 CSV、完整快照、受控 pandas 专业图、主动领取 worker/恢复、产物分页/图表、旧入口退役、回归/真实探针与文档。真实三轮回执 `data/stage-d/20261012T174750760175Z/receipt.json`；严格运行中故障回执 `data/stage-d/worker-recovery-20261012T174157758689Z/receipt.json`。固定镜像及启动配置见 runner/README.md 和 D Log。D 后的 E 已完成（见 E Log）；下一步入口为 F，不重开已确认 worker/pandas 方案；后续视觉页面、开发者标签页、复杂长会话未开始。

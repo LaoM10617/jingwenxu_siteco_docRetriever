@@ -129,3 +129,8 @@ def get_artifact(session_id: str, artifact_id: str, request: Request):
 @router.post('/{session_id}/artifacts/{artifact_id}/reuse')
 def reuse_artifact(session_id: str, artifact_id: str, body: ReuseRequest, request: Request):
     return request.app.state.artifacts.reuse(session_id, artifact_id, body.snapshot_id)
+
+
+@router.get('/{session_id}/artifacts/{artifact_id}/rows')
+def artifact_rows(session_id: str, artifact_id: str, request: Request, offset: int = 0, limit: int = 100):
+    return request.app.state.artifacts.page(session_id, artifact_id, offset, limit)

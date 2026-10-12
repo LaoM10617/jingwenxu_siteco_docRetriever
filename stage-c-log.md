@@ -2,6 +2,8 @@
 
 日期：2026-10-12。状态：代码已实现、自动化验证与双轴审查通过、真实 Gemini / Voyage PDF 链路已验证。用户授权直接实施 C，完成后停止，不自动推进 D。
 
+后续接手更正（2026-10-12）：用户已将 A–C 提交为 `e389512` 并推送。本轮 D 接手核对 main、HEAD 与本地 origin/main 均为该提交，初始工作区干净。下文“未提交／269d5fe”是阶段 C 当时快照，不能作为当前 Git 状态。旧运行容器仍未部署新架构。
+
 ## 1. 实现
 
 - `conversation_runs.py`：LangGraph 主图，严格 Intent、版本化范围、用途／持续规则、指代线索、PDF 专业调度、澄清 interrupt、停止和显式恢复。app.sqlite3 为业务权威，conversation-checkpoints.sqlite3 为图恢复库。

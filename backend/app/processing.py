@@ -71,7 +71,5 @@ class DocumentProcessor(PdfParsingProcessor):
         except ParseError as exc:
             raise ProcessingFailure(exc.code) from None
         report('parsing', parsed=parsed)
-        if not any(r.order_id for r in parsed.records):
-            raise ProcessingFailure('csv_no_order_ids')
         report('indexing')
         return parsed

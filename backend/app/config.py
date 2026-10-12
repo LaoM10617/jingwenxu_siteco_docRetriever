@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr | None = Field(default=None, repr=False)
     groq_api_key: SecretStr | None = Field(default=None, repr=False)
     voyage_api_key: SecretStr | None = Field(default=None, repr=False)
+    execution_worker_token: SecretStr | None = Field(default=None, repr=False)
+    execution_image: str | None = Field(default=None, pattern=r'^(?:[a-zA-Z0-9./:_-]+@)?sha256:[a-f0-9]{64}$')
 
     @field_validator("data_dir", mode="before")
     @classmethod
@@ -46,7 +48,7 @@ class Settings(BaseSettings):
                 raise ValueError("Directory path conflicts with an existing file")
         return resolved
 
-    @field_validator("gemini_api_key", "groq_api_key", "voyage_api_key", mode="before")
+    @field_validator("gemini_api_key", "groq_api_key", "voyage_api_key", "execution_worker_token", "execution_image", mode="before")
     @classmethod
     def empty_key_is_absent(cls, value: str | SecretStr | None):
         return None if isinstance(value, str) and not value.strip() else value

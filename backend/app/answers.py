@@ -8,7 +8,6 @@ from pydantic import Field, StringConstraints
 from app.documents import DocumentError
 from app.questions import Identity, QuestionBudget, StrictModel, ToolPlan, validated
 from app.question_numbers import Comparison, Conversion, EvidenceTools
-from app.memory import resolve
 
 
 Text = Annotated[str, StringConstraints(min_length=1, max_length=4000, strip_whitespace=True)]
@@ -65,16 +64,6 @@ source information and a gap instead of guessing the calculation. Gaps describe
 uncertainty, not additional uncited factual claims.'''
 
 
-SUBJECTS = ''' When resolved_subjects is present, it gives the already resolved targets
-of conversational pronouns and ordinals in the question (such as it, former, second).
-Use those literal subjects for the requested properties. Do not resolve the ordinal
-again by counting rows in the retrieved evidence. The subjects identify what to look
-up; they are not evidence of its properties. Answer other explicitly named subjects
-as requested, and require current evidence for every factual claim.'''
-PLAN += SUBJECTS
-ANSWER += SUBJECTS
-
-
 def evidence_context(bundle):
     """Bound model context without cutting a source away from its qualifiers."""
     context = {key: deepcopy(bundle[key]) for key in ('question', 'document_ids', 'unresolved')}
@@ -100,40 +89,24 @@ class AnswerService:
     def __init__(self, tools, model):
         self.tools, self.model = tools, model
 
-    def answer(self, request, *, budget=None, on_wait=None, on_stage=None, history=None):
+    def answer(self, request, *, budget=None, on_wait=None, on_stage=None):
         budget = budget or QuestionBudget()
         stage = on_stage or (lambda value: None)
-        memory = None
-        if history is not None:
-            stage('resolving_references')
-            question, memory = resolve(self.model, request['question'], history, budget)
-            if question is None:
-                return {'status': 'completed', 'conversation_id': request['conversation_id'],
-                        'document_ids': request['document_ids'], 'outcome': 'needs_clarification',
-                        'segments': [], 'citations': [], 'calculations': [], 'warnings': [],
-                        'gaps': ['Please specify the product or topic; the available history does not resolve the reference reliably.'],
-                        'unresolved': [{'code': 'memory_needs_clarification'}], 'tool_results': [],
-                        'context': {'shown_evidence_count': 0, 'omitted_evidence_count': 0},
-                        'validation': {'rejected_segments': 0}, 'memory': memory,
-                        'provider': self.model.provider, 'model': self.model.model}
-            request = {**request, 'question': question}
-        subjects = {'resolved_subjects': [r['term'] for r in memory['references']]} if memory else {}
         def planner(question, documents, deadline):
             if all(d['media_type'] == 'application/pdf' for d in documents):
                 return {'tools': [{'tool': 'retrieve_pdf', 'document_ids': question['document_ids']}]}
             return self.model.generate(PLAN, {'phase': 'plan', 'question': question['question'],
-                                             'documents': documents, **subjects}, ToolPlan.model_json_schema(), deadline)
+                                             'documents': documents}, ToolPlan.model_json_schema(), deadline)
         stage('planning')
         bundle = self.tools.prepare(request, planner=planner, budget=budget, on_wait=on_wait, on_stage=on_stage)
-        context = {**evidence_context(bundle), **subjects}
+        context = evidence_context(bundle)
         budget.check()
         base = {'status': 'completed', 'conversation_id': bundle['conversation_id'],
                 'document_ids': bundle['document_ids'], 'warnings': bundle['warnings'],
                 'unresolved': deepcopy(bundle['unresolved']), 'tool_results': context['tools'],
                 'context': {'shown_evidence_count': len(context['evidence']),
                             'omitted_evidence_count': context['omitted_evidence_count']},
-                'provider': self.model.provider, 'model': self.model.model,
-                **({'memory': memory} if memory is not None else {})}
+                'provider': self.model.provider, 'model': self.model.model}
         pdf_tools = [t for t in bundle['tools'] if t['tool'] == 'retrieve_pdf']
         if pdf_tools:
             diagnostics = deepcopy(pdf_tools[0]['result'].get('diagnostics'))

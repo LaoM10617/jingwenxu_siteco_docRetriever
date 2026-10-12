@@ -14,6 +14,9 @@
 !tests/
 !tests/test_tracing.py
 !pytest.ini
+!runner/
+!runner/Dockerfile
+!runner/requirements.lock
 !frontend/
 !frontend/Dockerfile
 !frontend/nginx.conf

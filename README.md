@@ -1,5 +1,11 @@
 # SITECO Document Chat
 
+Current architecture and stage evidence: [plan.md](plan.md), [stage-d-log.md](stage-d-log.md).
+The original demo and historical evaluation notes below predate the session/run API.
+The legacy `/api/questions` worker has been retired; current chat uses `/api/sessions/{id}/runs`.
+For CSV analysis, build and configure the separate trusted host worker as described in
+[runner/README.md](runner/README.md). Backend and analysis containers never mount the Docker socket.
+
 ## 1. Demo
 
 Upload documents, ask questions, and inspect the sources behind each answer.
@@ -29,8 +35,8 @@ Main folders and selected entry points:
 |   |   |-- embeddings.py, voyage.py  Embedding provider integration
 |   |   |-- reranking.py              Optional result reranking
 |   |   |-- questions.py, answers.py  Question routing and grounded answers
-|   |   |-- question_tasks.py         Asynchronous question execution
-|   |   |-- memory.py, generation.py  Conversation context and model calls
+|   |   |-- conversation_runs.py      Durable graph orchestration
+|   |   |-- sessions.py, generation.py Persisted context and model calls
 |   |   |-- previews.py              Source preview data
 |   |   |-- config.py, runtime_*.py   Configuration and runtime service wiring
 |   |   `-- services/                Request tracing and summary statistics
@@ -255,7 +261,7 @@ Provider failures can block follow-up turns.
 
 **Possibly involved:** [generation.py](backend/app/generation.py), `QuestionBudget`
 in [questions.py](backend/app/questions.py), and
-[question_tasks.py](backend/app/question_tasks.py).
+the retired `question_tasks.py` worker (now replaced by [conversation_runs.py](backend/app/conversation_runs.py)).
 
 **Diagnosis:** Two failed attempts lasting approximately 60 seconds confirm only
 that the call did not succeed; it is not yet possible to determine whether the

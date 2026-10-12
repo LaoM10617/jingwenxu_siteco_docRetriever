@@ -42,39 +42,44 @@ def test_settings_atomic_clear_restore_and_revision(tmp_path):
 def test_task_freezes_configuration_and_idempotent_retry(tmp_path, monkeypatch):
     from threading import Event
     from app.processing import DocumentProcessor
-    from test_question_tasks import Model, ready
     from app import generation
     release,entered=Event(),Event(); observed=[]
-    class Controlled(Model):
+    class Controlled:
+        provider = 'test'
+        model = 'controlled'
         def __init__(self, config):
-            super().__init__(); self.key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None
+            self.key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None
         def generate(self,*args):
             observed.append(self.key)
             if self.key=='old-secret':
                 entered.set(); assert release.wait(3)
-            return super().generate(*args)
+            return {'route':'direct','objective':'Greeting','direct_answer':'Hello'}
     monkeypatch.setattr(generation,'StructuredModel',Controlled)
     monkeypatch.setattr('app.runtime_bindings.StructuredModel',Controlled)
     app=create_app(Settings(_env_file=None,data_dir=tmp_path,gemini_api_key='old-secret'),processor=DocumentProcessor())
     with TestClient(app) as client:
-        doc=ready(client); body={'conversation_id':'a','request_id':'one','question':'001','document_ids':[doc]}
+        sid=client.post('/api/sessions').json()['session_id']
+        other=client.post('/api/sessions').json()['session_id']
+        path=f'/api/sessions/{sid}/runs'
+        other_path=f'/api/sessions/{other}/runs'
+        body={'request_id':'one','question':'Hello','expected_data_version':0,'expected_rule_version':0}
         try:
-            first=client.post('/api/questions',json=body).json()
+            first=client.post(path,json=body).json()
             assert entered.wait(2)
             state=client.get('/api/settings').json()
             client.patch('/api/settings',json={'expected_revision':state['revision'],'generation':{'profiles':{'gemini':{'credential':{'action':'replace','value':'new-secret'}}}},'retrieval':{'top_k':1}})
-            assert client.post('/api/questions',json=body).json()['question_id']==first['question_id']
-            second=client.post('/api/questions',json={**body,'request_id':'two'}).json()
+            assert client.post(path,json=body).json()['run_id']==first['run_id']
+            second=client.post(other_path,json={**body,'request_id':'two'}).json()
             assert first['config_snapshot']['retrieval']['top_k']==8
             assert second['config_snapshot']['retrieval']['top_k']==1
         finally: release.set()
         import time
         for _ in range(100):
-            result=client.get('/api/questions/'+second['question_id']+'?conversation_id=a').json()
+            result=client.get(other_path+'/'+second['run_id']).json()
             if result['status'] in ('completed','failed'):break
             time.sleep(.02)
         assert result['status']=='completed'
-        assert observed==['old-secret','old-secret','new-secret','new-secret']
+        assert observed==['old-secret','new-secret']
         assert b'old-secret' not in (tmp_path/'app.sqlite3').read_bytes()
         assert b'new-secret' not in (tmp_path/'app.sqlite3').read_bytes()
 

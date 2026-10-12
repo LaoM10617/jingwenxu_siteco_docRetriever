@@ -203,13 +203,13 @@ def test_invalid_csv_reports_failure_and_application_stops_worker(tmp_path):
     from app.config import Settings
     app = create_app(Settings(data_dir=tmp_path))
     with TestClient(app) as client:
-        response = client.post('/api/documents', files={'file': ('one.csv', b'id\n1')})
+        response = client.post('/api/documents', files={'file': ('one.csv', b'id,id\n1,2')})
         assert response.status_code == 202
         document_id = response.json()['document_id']
         result = wait_status(app.state.documents, document_id, 'failed')
         assert result['error'] == {
             'code': 'csv_header_invalid',
-            'message': 'CSV headers do not match the supported price-list schema.',
+            'message': 'CSV requires nonempty, unique column names.',
             'retryable': False}
         with pytest.raises(DocumentError):
             app.state.documents.retry(document_id)

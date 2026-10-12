@@ -1,6 +1,5 @@
 """M3.4 failures remain execution failures across task publication and recovery."""
 import time
-from threading import Event
 
 import httpx
 import pytest
@@ -11,14 +10,12 @@ from app.config import Settings
 from app.generation import StructuredModel
 from app.processing import DocumentProcessor
 from test_app import settings_for
-from test_question_tasks import Model, ready
-from test_multi_document_tasks import finish
-from test_csv_lifecycle import service
+from document_test_helpers import ready
 
 
-def terminal(client, identity):
+def terminal(client, sid, identity):
     for _ in range(250):
-        result = client.get('/api/questions/' + identity, params={'conversation_id':'a'})
+        result = client.get(f'/api/sessions/{sid}/runs/{identity}')
         assert result.status_code == 200
         task = result.json()
         if task['status'] in ('completed','failed'):
@@ -49,115 +46,17 @@ def test_sdk_failure_is_published_once_without_an_absence_of_evidence_answer(tmp
         gemini_api_key='fake',groq_api_key='fake'),transport=httpx.MockTransport(respond))
     with TestClient(create_app(settings_for(tmp_path),processor=DocumentProcessor(),model=model)) as client:
         doc=ready(client)
-        body={'conversation_id':'a','request_id':'r','question':'001','document_ids':[doc]}
-        submitted=client.post('/api/questions',json=body)
+        sid = client.post('/api/sessions').json()['session_id']
+        body={'request_id':'r','question':'Hello','expected_data_version':0,'expected_rule_version':0}
+        path=f'/api/sessions/{sid}/runs'
+        submitted=client.post(path,json=body)
         assert submitted.status_code == 202
-        qid=submitted.json()['question_id']
-        task=terminal(client,qid)
-        assert task['status'] == task['stage'] == 'failed'
+        qid=submitted.json()['run_id']
+        task=terminal(client,sid,qid)
+        assert task['status'] == 'failed'
         assert task['error']['code'] == code and task['answer'] is None
         assert 'private-provider-detail' not in str(task)
-        assert client.post('/api/questions',json=body).json()['question_id'] == qid
-        assert terminal(client,qid) == task
+        assert client.post(path,json=body).json()['run_id'] == qid
+        assert terminal(client,sid,qid) == task
         assert len(calls) == 1
         assert client.get('/api/documents/'+doc).json()['status'] == 'ready'
-
-
-def test_expired_question_and_paging_are_unavailable_but_ready_document_survives(tmp_path, monkeypatch):
-    clock=[1_800_000_000.0]
-    monkeypatch.setattr('app.question_tasks.time.time',lambda:clock[0])
-    model=Model()
-    with TestClient(create_app(settings_for(tmp_path),processor=DocumentProcessor(),model=model)) as client:
-        doc=ready(client)
-        body={'conversation_id':'a','request_id':'r','question':'001','document_ids':[doc]}
-        task=finish(client,body)
-        path='/api/questions/'+task['question_id']
-        clock[0]+=86399
-        assert client.get(path,params={'conversation_id':'a'}).status_code == 200
-        clock[0]+=2
-        assert client.get(path,params={'conversation_id':'a'}).status_code == 404
-        assert client.get(path+'/csv/0',params={'conversation_id':'a'}).status_code == 404
-        assert client.get('/api/documents/'+doc).json()['status'] == 'ready'
-        assert model.calls == 2
-        # Retention bounds idempotency; only an explicit new submission creates work again.
-        renewed=finish(client,body)
-        assert renewed['question_id'] != task['question_id']
-        assert model.calls == 4
-
-
-def test_restart_preserves_interrupted_tasks_without_reexecuting_them(tmp_path):
-    entered,release=Event(),Event()
-    class Blocked(Model):
-        def generate(self,*args):
-            entered.set()
-            assert release.wait(10)
-            return super().generate(*args)
-    old=Blocked()
-    try:
-        with TestClient(create_app(settings_for(tmp_path),processor=DocumentProcessor(),model=old)) as client:
-            doc=ready(client)
-            body={'conversation_id':'a','request_id':'running','question':'001','document_ids':[doc]}
-            first=client.post('/api/questions',json=body).json()['question_id']
-            assert entered.wait(2)
-            queued={**body,'request_id':'queued'}
-            second=client.post('/api/questions',json=queued).json()['question_id']
-        new=Model()
-        with TestClient(create_app(settings_for(tmp_path),processor=DocumentProcessor(),model=new)) as client:
-            release.set()
-            for qid,value in [(first,body),(second,queued)]:
-                task=terminal(client,qid)
-                assert task['error']['code'] == 'question_interrupted'
-                assert task['answer'] is None
-                assert client.post('/api/questions',json=value).json()['question_id'] == qid
-            assert new.calls == 0
-            # A new request proves the restarted worker is usable, not silently replaying old work.
-            finish(client,{**body,'request_id':'explicit-new'})
-            assert new.calls == 2
-            for qid in [first,second]:
-                assert terminal(client,qid)['error']['code'] == 'question_interrupted'
-            assert client.get('/api/documents/'+doc).json()['status'] == 'ready'
-    finally:
-        release.set()
-
-
-@pytest.mark.parametrize('phase', ['plan','answer'])
-def test_queued_and_running_deadlines_remain_final_after_late_provider_returns(tmp_path, phase, service):
-    from app.answers import AnswerService
-    from app.questions import QuestionTools
-    from app.question_tasks import QuestionTasks
-    from test_csv_lifecycle import publish
-    from test_csv_parsing import row
-    documents=service
-    doc=publish(documents,[row('001')])
-    entered,release=Event(),Event()
-    clock=[0.0]
-    class Late(Model):
-        def generate(self,system,payload,schema,budget):
-            if payload['phase']==phase:
-                entered.set()
-                assert release.wait(10)
-            return super().generate(system,payload,schema,budget)
-    tasks=QuestionTasks(tmp_path/'tasks.sqlite3',AnswerService(QuestionTools(documents,None),Late()),
-                        now=lambda:clock[0])
-    body={'conversation_id':'a','request_id':'first','question':'001','document_ids':[doc]}
-    try:
-        first=tasks.submit(body)
-        assert entered.wait(2)
-        second=tasks.submit({**body,'request_id':'queued'})
-        clock[0]=241
-        frozen=[tasks.get(t['question_id'],'a') for t in [first,second]]
-        assert all(t['error']['code']=='question_timeout' and t['answer'] is None for t in frozen)
-        release.set()
-        sentinel=tasks.submit({**body,'request_id':'after-timeout'})
-        for _ in range(250):
-            last=tasks.get(sentinel['question_id'],'a')
-            if last['status'] in ('completed','failed'):
-                break
-            time.sleep(.02)
-        assert last['status']=='completed'
-        # The single worker passed both old jobs before this sentinel completed.
-        assert [tasks.get(t['question_id'],'a') for t in [first,second]] == frozen
-        assert documents.get(doc)['status']=='ready'
-    finally:
-        release.set()
-        tasks.stop()

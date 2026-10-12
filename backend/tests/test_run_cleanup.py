@@ -29,14 +29,22 @@ def test_session_delete_retries_checkpoint_cleanup_without_reexecution(tmp_path,
 
 
 def test_permanent_source_deletion_cleans_graph_derived_data_and_keeps_history(tmp_path):
+    from threading import Event
+    import time
     from fastapi.testclient import TestClient
     from test_run_api import Model, prepared, upload, submission, poll
     model = Model()
     with TestClient(prepared(tmp_path, model)) as client:
+        published, release_graph = Event(), Event()
+        def after_publish():
+            published.set()
+            release_graph.wait(10)
+        client.app.state.runs._after_publish = after_publish
         sid, did = upload(client, tmp_path)
         base = f'/api/sessions/{sid}/runs'
         run = client.post(base, json=submission(client, sid)).json()
         assert poll(client, sid, run['run_id'], {'completed', 'failed'})['status'] == 'completed'
+        assert published.wait(2)
         assert client.post(f'/api/documents/{did}/trash').status_code == 200
         assert client.delete(f'/api/documents/{did}').status_code == 200
         saved = client.get(base+'/'+run['run_id']).json()
@@ -46,5 +54,18 @@ def test_permanent_source_deletion_cleans_graph_derived_data_and_keeps_history(t
         with runs._db() as db:
             assert db.execute('SELECT count(*) FROM conversation_tasks').fetchone()[0] == 0
             assert db.execute('SELECT count(*) FROM conversation_evidence').fetchone()[0] == 0
+            assert db.execute('SELECT count(*) FROM conversation_purges').fetchone()[0] == 1
+        # Business publication can precede the final checkpoint write. Deletion
+        # queues cleanup until the graph releases its lock; the HTTP worker's
+        # finally block must complete that cleanup without help from this test.
+        release_graph.set()
+        deadline = time.monotonic() + 5
+        while True:
+            with runs._db() as db:
+                pending = db.execute('SELECT count(*) FROM conversation_purges').fetchone()[0]
+            if pending == 0:
+                break
+            assert time.monotonic() < deadline, 'Scheduled checkpoint cleanup did not complete'
+            time.sleep(.01)
         with sqlite3.connect(runs.checkpoints) as db:
             assert db.execute('SELECT count(*) FROM checkpoints').fetchone()[0] == 0

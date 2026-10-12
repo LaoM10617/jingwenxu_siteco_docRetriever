@@ -47,6 +47,7 @@ class RuntimeBindings:
         answer.config_snapshot['embedding']={'provider':'voyage','model':config.embedding_model}
         answer.config_snapshot['execution']={key:getattr(config,key) for key in (
             'embedding_rpm','embedding_tpm','embedding_min_interval','rerank_min_interval')}
+        answer.config_snapshot['execution']['python_image'] = config.execution_image
         return answer
 
     def processor(self):

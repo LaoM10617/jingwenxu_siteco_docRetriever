@@ -27,6 +27,10 @@ def invalidate_source(db, version_id):
     """Called in permanent deletion's transaction, before removing original data."""
     if not db.execute("SELECT 1 FROM sqlite_master WHERE name='conversation_runs'").fetchone():
         return
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='execution_jobs'").fetchone():
+        db.execute('''DELETE FROM execution_jobs WHERE job_id IN (
+            SELECT j.job_id FROM execution_jobs j, json_each(j.payload, '$.task.scope.documents') d
+            WHERE json_extract(d.value, '$.version_id')=?)''', (version_id,))
     db.execute('CREATE TABLE IF NOT EXISTS conversation_purges (run_id TEXT PRIMARY KEY)')
     ids = [row[0] for row in db.execute('''SELECT r.run_id FROM conversation_runs r
         JOIN turn_snapshots s ON s.snapshot_id=r.snapshot_id
@@ -34,6 +38,7 @@ def invalidate_source(db, version_id):
         WHERE json_extract(d.value, '$.version_id')=?''', (version_id,))]
     for run_id in ids:
         db.execute('DELETE FROM conversation_tasks WHERE run_id=?', (run_id,))
+        db.execute('DELETE FROM conversation_model_receipts WHERE run_id=?', (run_id,))
         db.execute('DELETE FROM conversation_evidence WHERE run_id=?', (run_id,))
         db.execute("DELETE FROM conversation_events WHERE run_id=? AND channel='developer'", (run_id,))
         db.execute("UPDATE conversation_runs SET stop_requested=1, status=CASE WHEN status='completed' THEN status ELSE 'stopped' END WHERE run_id=?", (run_id,))

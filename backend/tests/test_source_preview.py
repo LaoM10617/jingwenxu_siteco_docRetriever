@@ -9,7 +9,7 @@ from app.main import create_app
 from app.processing import DocumentProcessor
 from test_app import settings_for
 from test_multi_document_tasks import TaskGateway, upload
-from test_question_tasks import csv_bytes
+from document_test_helpers import csv_bytes
 from test_csv_parsing import row
 from test_parsing import pdf_file
 
@@ -135,7 +135,7 @@ def test_context_regions_and_missing_original_keep_text_available(tmp_path):
 
 def test_nonready_preview_uses_same_gate_as_evidence(tmp_path):
     with TestClient(create_app(settings_for(tmp_path))) as client:
-        doc = client.post('/api/documents', files={'file': ('bad.csv', b'id\n1')}).json()['document_id']
+        doc = client.post('/api/documents', files={'file': ('bad.csv', b'id,id\n1,2')}).json()['document_id']
         response = client.get(f'/api/documents/{doc}/evidence/unknown/preview')
         assert response.status_code == 409
         assert response.json()['error']['code'] == 'document_not_ready'

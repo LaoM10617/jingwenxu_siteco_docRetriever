@@ -80,6 +80,7 @@ def public_document(document):
     if parsed is not None and parsed.get('kind') == 'csv':
         result['parsing'] = {key: parsed[key] for key in (
             'kind', 'parser_version', 'record_count', 'indexed_record_count', 'price_counts')}
+        result['parsing']['profile'] = parsed.get('profile')
     elif parsed is not None:
         coverage = {status: sum(p['status'] == status for p in parsed['pages'])
                     for status in ('extracted', 'degraded', 'no_text', 'failed')}

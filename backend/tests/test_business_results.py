@@ -1,4 +1,4 @@
-"""M3.3 business outcomes and source publication through real task HTTP."""
+"""Business outcomes and source validation through the retained answer interface."""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -6,7 +6,7 @@ from app.main import create_app
 from app.processing import DocumentProcessor
 from test_app import settings_for
 from test_multi_document_tasks import TaskGateway, ScopeModel, upload, finish
-from test_question_tasks import csv_bytes
+from document_test_helpers import csv_bytes
 from test_csv_parsing import row
 from test_parsing import pdf_file
 
@@ -76,16 +76,14 @@ def test_omitted_and_invalid_sources_withdraw_whole_segments_but_paging_keeps_du
         calls = len(model.payloads)
         records = []
         for offset in (0,20,40):
-            page = client.get(f"/api/questions/{task['question_id']}/csv/0",
-                params={'conversation_id':'a','offset':offset,'limit':20}).json()
+            page = client.app.state.documents.lookup_orders(['001'], [first,second], offset=offset, limit=20)
             assert page['total'] == 56
             records.extend(page['records'])
         assert len({(s['document_id'],s['evidence_id']) for s in records}) == 56
         assert {s['document_id'] for s in records} == {first,second}
         assert sorted(s['locator']['record_number'] for s in records if s['document_id']==first) == list(range(1,56))
         assert len(model.payloads) == calls
-        restored = client.get('/api/questions/' + task['question_id'],params={'conversation_id':'a'}).json()
-        assert restored['answer'] == answer
+
 
 
 @pytest.mark.parametrize('wrong_product', [True, False])

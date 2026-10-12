@@ -84,7 +84,7 @@ def test_pdf_conversion_keeps_deterministic_calculation_and_citations(workspace)
 
     class ConvertingModel(Model):
         def generate(self, system, payload, schema, budget):
-            if payload['phase'] == 'answer':
+            if payload['phase'] == 'pdf_facts_answer':
                 return {'outcome': 'partial', 'segments': [], 'gaps': [], 'calculations': [
                     {'calculation_id': 'C1', 'operation': {'tool': 'convert',
                      'fact': {'citation_id': 'S1', 'parameter': 'power', 'product': 'A', 'span_index': 0}, 'unit': 'kW'}}]}
@@ -108,7 +108,7 @@ def test_clarification_and_invalid_citations_are_not_fabricated_success(workspac
     service.model = Model(draft('invented'))
     with pytest.raises(DocumentError) as error:
         PdfSpecialist(service).execute(task, QuestionBudget())
-    assert error.value.code == 'generation_invalid_citations'
+    assert error.value.code == 'invalid_pdf_citations'
 
 
 def test_stop_after_model_return_prevents_result_publication(workspace):
