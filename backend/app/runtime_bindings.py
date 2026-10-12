@@ -45,6 +45,8 @@ class RuntimeBindings:
         answer.config_snapshot['generation']={'provider':config.generation_provider,
             'model':getattr(config,config.generation_provider+'_generation_model')}
         answer.config_snapshot['embedding']={'provider':'voyage','model':config.embedding_model}
+        answer.config_snapshot['execution']={key:getattr(config,key) for key in (
+            'embedding_rpm','embedding_tpm','embedding_min_interval','rerank_min_interval')}
         return answer
 
     def processor(self):

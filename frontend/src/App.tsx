@@ -55,15 +55,8 @@ export default function App() {
   const [listError, setListError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [refresh, setRefresh] = useState(0);
-  const [selected, setSelected] = useState<string[]>(() => {
-    try {
-      const saved = JSON.parse(sessionStorage.getItem('siteco-material-scope') || 'null');
-      if (saved?.conversation === chat.chat.conversation && Array.isArray(saved.ids)
-          && saved.ids.length <= 10 && saved.ids.every((id: unknown) => typeof id === 'string'))
-        return [...new Set<string>(saved.ids)];
-    } catch { /* Storage is optional; the current page remains usable. */ }
-    return [];
-  });
+  const [selected, setSelected] = useState<string[]>([]);
+  const [selectionSession, setSelectionSession] = useState('');
   const [scopeNotice, setScopeNotice] = useState('');
   const [sidebar, setSidebar] = useState(false);
   const [narrow, setNarrow] = useState(
@@ -158,10 +151,21 @@ export default function App() {
   }
 
   useEffect(() => {
+    const sid = chat.chat.conversation;
+    if (!sid || sid === selectionSession) return;
+    let ids: string[] = [];
     try {
-      sessionStorage.setItem('siteco-material-scope', JSON.stringify({conversation: chat.chat.conversation, ids: selected}));
-    } catch { /* Storage is optional. */ }
-  }, [selected, chat.chat.conversation]);
+      const saved = JSON.parse(sessionStorage.getItem('siteco-material-scope') || 'null');
+      if (saved?.conversation === sid && Array.isArray(saved.ids)
+          && saved.ids.every((id: unknown) => typeof id === 'string')) ids = [...new Set<string>(saved.ids)];
+    } catch { /* Browser selection is optional. */ }
+    setSelected(ids); setSelectionSession(sid);
+  }, [chat.chat.conversation, selectionSession]);
+  useEffect(() => {
+    if (!selectionSession || selectionSession !== chat.chat.conversation) return;
+    try {sessionStorage.setItem('siteco-material-scope', JSON.stringify({conversation:selectionSession,ids:selected}));}
+    catch { /* Server source rules remain available. */ }
+  }, [selected, selectionSession, chat.chat.conversation]);
 
   useEffect(() => {
     if (!loaded || listError) return;
@@ -265,7 +269,8 @@ export default function App() {
         try {
           const body = new FormData();
           body.append("file", file);
-          await request("/documents", { method: "POST", body });
+          const session = await chat.ensureSession();
+          await request(`/documents?session_id=${session.session_id}`, { method: "POST", body });
           update("received");
         } catch (error) {
           update(
@@ -579,7 +584,7 @@ export default function App() {
               This tab keeps the current conversation temporarily so you can refresh and resume a question.
             </p>
             <p className="muted">
-              Conversation memory lasts 24 hours from the first question. Each answer uses freshly checked sources.
+              Conversations remain on this device until deleted. Each answer uses freshly checked sources.
             </p>
           </section>
         )}
@@ -598,7 +603,7 @@ export default function App() {
             close={() => setPreview(null)}
           />
         ) : chat.chat.turns.length ? (
-          <ChatThread turns={chat.chat.turns} retry={chat.submit} refresh={chat.refresh} />
+          <ChatThread turns={chat.chat.turns} retry={chat.submit} refresh={chat.refresh} control={chat.control} />
         ) : (
           <section className="welcome">
             <div className="document-mark">
@@ -621,6 +626,7 @@ export default function App() {
           </section>
         )}
         <div className="composer-area">
+          {chat.error && <p role="alert" className="error">{chat.error}</p>}
           {scopeNotice && <p role="status" className="notice">{scopeNotice}</p>}
           <div className="scope-line">
             <button onClick={showMaterials}>
@@ -635,7 +641,7 @@ export default function App() {
                     ? `${processing.length} processing`
                     : failed.length
                       ? `${failed.length} unavailable — see materials`
-                      : selected.length ? "Ready to ask about selected materials" : "Select ready materials to ask questions"}
+                      : selected.length ? "Ready to ask about selected materials" : "Ask a question or use the session source rules"}
             </span>
           </div>
           {(listError ||
@@ -674,7 +680,7 @@ export default function App() {
               </details>
               <button
                 className="send-button"
-                disabled={!loaded || selected.some(id => !documents.some(d => d.document_id === id && d.status === "ready")) || chat.busy || !chat.message.trim() || !selected.length || !!listError || chat.chat.turns.length >= 50}
+                disabled={!loaded || selected.some(id => !documents.some(d => d.document_id === id && d.status === "ready")) || chat.busy || !chat.message.trim() || !!listError}
                 onClick={() => {setPreview(null); chat.send(selected, selected.map(id => documents.find(d => d.document_id === id)?.original_filename || id));}}
                 aria-label="Send message"
               >
@@ -683,9 +689,7 @@ export default function App() {
             </div>
           </div>
           <p className="composer-note">
-            {chat.expired ? 'Conversation memory expired. Start a new conversation.' :
-              'Follow-up questions use up to 6 recent turns. Answers use only the currently selected materials.'}
-            {chat.chat.turns.length >= 50 && ' Start a new conversation to ask more questions.'}
+            Selected materials limit this turn. With no selection, the session source rules apply. PDF fact questions are supported; general CSV analysis follows in the next phase.
           </p>
         </div>
       </main>

@@ -70,7 +70,7 @@ def test_http_accepts_one_file_and_reports_rejections(tmp_path):
     with TestClient(create_app(Settings(data_dir=tmp_path), processor=WaitingProcessor())) as client:
         response = client.post('/api/documents', files={'file': ('same.csv', b'id\n1', 'text/csv')})
         assert response.status_code == 202
-        assert set(response.json()) == {'document_id', 'original_filename', 'status'}
+        assert set(response.json()) == {'document_id', 'version_id', 'logical_document_id', 'original_filename', 'status'}
         assert response.json()['status'] == 'queued'
         assert client.post('/api/documents', files={'file': ('x.exe', b'x')}).status_code == 415
         assert client.post('/api/documents', files=[('file', ('a.csv', b'a')), ('file', ('b.csv', b'b'))]).status_code == 422

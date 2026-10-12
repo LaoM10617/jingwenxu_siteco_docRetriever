@@ -13,8 +13,15 @@ from app.documents import DocumentError, MAX_FILE_BYTES
 router = APIRouter()
 
 
+@router.get('/api/document-versions/{version_id}')
+def document_version(version_id: str, request: Request):
+    version = request.app.state.sessions.version(version_id)
+    return {key: version[key] for key in ('document_id', 'version_id', 'status')}
+
+
 @router.post('/api/documents', status_code=202)
-async def upload_document(request: Request):
+async def upload_document(request: Request, session_id: str | None = None,
+                          logical_document_id: str | None = None):
     service = request.app.state.documents
     reservation = None
     try:
@@ -35,8 +42,13 @@ async def upload_document(request: Request):
             if len(items) != 1 or items[0][0] != 'file' or not isinstance(items[0][1], UploadFile):
                 raise DocumentError('invalid_upload', 'Provide exactly one file field.', 422)
             file = items[0][1]
-            document = await run_in_threadpool(service.submit, file.filename, file.file, reservation=reservation)
-            return {key: document[key] for key in ('document_id', 'original_filename', 'status')}
+            document = await run_in_threadpool(service.submit, file.filename, file.file, reservation=reservation,
+                                              session_id=session_id, logical_document_id=logical_document_id)
+            result = {key: document[key] for key in ('document_id', 'original_filename', 'status')}
+            result['version_id'] = document['document_id']
+            if service.lifecycle is not None:
+                result['logical_document_id'] = service.lifecycle.version(document['document_id'])['document_id']
+            return result
     except DocumentError as exc:
         return JSONResponse(status_code=exc.status_code, content={
             'error': {'code': exc.code, 'message': str(exc), 'retryable': exc.retryable}})
@@ -93,12 +105,23 @@ def list_trash(request: Request):
 
 @router.delete('/api/trash')
 def empty_trash(request: Request):
-    return request.app.state.documents.empty_trash()
+    result = request.app.state.documents.empty_trash()
+    from app.run_cleanup import retry_purges
+    retry_purges(request.app.state.runs)
+    return result
 
 
 @router.post('/api/documents/{document_id}/trash')
 def trash_document(document_id: str, request: Request):
     return public_document(request.app.state.documents.trash(document_id))
+
+
+@router.delete('/api/documents/{document_id}')
+def delete_document(document_id: str, request: Request):
+    result = request.app.state.documents.delete(document_id)
+    from app.run_cleanup import retry_purges
+    retry_purges(request.app.state.runs)
+    return result
 
 
 @router.post('/api/documents/{document_id}/restore')

@@ -39,6 +39,8 @@ class DocumentService:
         self.processor_factory = None
         self._job_processors = {}
         self._csv_ready = set()
+        self.lifecycle = None
+        self.derived = None
         with closing(sqlite3.connect(self.database)) as db, db:
             db.execute('''CREATE TABLE IF NOT EXISTS documents (
                 document_id TEXT PRIMARY KEY, original_filename TEXT NOT NULL,
@@ -49,6 +51,7 @@ class DocumentService:
             db.execute('CREATE TABLE IF NOT EXISTS upload_reservations (document_id TEXT PRIMARY KEY)')
             db.execute('CREATE TABLE IF NOT EXISTS document_artifacts (document_id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS document_parses (document_id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS document_deletions (document_id TEXT PRIMARY KEY, stored_name TEXT NOT NULL)')
         self._csv = CsvStore(self.database)
         self._pdf = PdfStore(self.database)
         from app.retrieval.pdf import FtsStore
@@ -85,7 +88,7 @@ class DocumentService:
         for document_id in ids:
             self.discard(document_id)
 
-    def submit(self, filename, source, *, reservation=None):
+    def submit(self, filename, source, *, reservation=None, session_id=None, logical_document_id=None):
         document_id = reservation or self.reserve()
         temporary = self.uploads / (document_id + '.part')
         destination = self.uploads / document_id
@@ -115,6 +118,8 @@ class DocumentService:
                 db.execute('INSERT INTO documents VALUES (?,?,?,?,?,?,?,?,?,?)',
                            (document_id, filename, document_id, size, digest.hexdigest(),
                             'queued', 'queued', None, now, now))
+                if self.lifecycle is not None:
+                    self.lifecycle.register_upload(db, document_id, session_id, logical_document_id)
                 db.execute('DELETE FROM upload_reservations WHERE document_id=?', (document_id,))
             document = self.get(document_id)
             with self._lock:
@@ -168,6 +173,8 @@ class DocumentService:
                 raise DocumentError('document_busy', 'Wait for processing to finish before moving this file to Trash.', 409)
             db.execute('INSERT INTO document_trash VALUES (?,?)', (document_id, row[0]))
             db.execute("UPDATE documents SET status='trashed', updated_at=? WHERE document_id=?", (self._now(), document_id))
+            if self.lifecycle is not None:
+                self.lifecycle.document_changed(db, document_id)
             db.commit()
             return self.get(document_id)
 
@@ -177,6 +184,8 @@ class DocumentService:
             document = self.get(document_id)
             if document is None:
                 raise DocumentError('document_not_found', 'Unknown document ID.', 404)
+            if document['status'] == 'deleting':
+                raise DocumentError('document_deleting', 'Permanent deletion is in progress.', 409)
             if document['status'] != 'trashed':
                 return document
             previous = db.execute('SELECT previous_status FROM document_trash WHERE document_id=?', (document_id,)).fetchone()[0]
@@ -187,25 +196,61 @@ class DocumentService:
                     raise DocumentError('document_limit_reached', 'The workspace has no free document slots. Move another file to Trash first.', 409)
             db.execute('UPDATE documents SET status=?, updated_at=? WHERE document_id=?', (previous, self._now(), document_id))
             db.execute('DELETE FROM document_trash WHERE document_id=?', (document_id,))
+            if self.lifecycle is not None:
+                self.lifecycle.document_changed(db, document_id)
             db.commit()
             return self.get(document_id)
 
     def empty_trash(self):
-        with self._lock, closing(sqlite3.connect(self.database)) as db, db:
-            db.execute('BEGIN IMMEDIATE')
-            rows = db.execute("SELECT document_id, stored_name FROM documents WHERE status='trashed'").fetchall()
-            for document_id, stored_name in rows:
-                path = (self.uploads / stored_name).resolve()
-                if path.parent != self.uploads.resolve():
-                    raise DocumentError('storage_unavailable', 'Invalid stored file location.', 503)
-                path.unlink(missing_ok=True)
-                self._csv.clear(db, document_id)
-                self._pdf.clear(db, document_id)
-                for table in ('pdf_fts', 'document_artifacts', 'document_parses', 'document_trash', 'documents'):
-                    db.execute(f'DELETE FROM {table} WHERE document_id=?', (document_id,))
-                self._published.pop(document_id, None)
-                self._csv_ready.discard(document_id)
+        with self._lock:
+            with closing(sqlite3.connect(self.database)) as db:
+                rows = db.execute("SELECT document_id FROM documents WHERE status IN ('trashed','deleting')").fetchall()
+            for (document_id,) in rows:
+                self.delete(document_id)
             return {'deleted': len(rows)}
+
+    def delete(self, document_id):
+        """Commit revocation before deleting bytes; interrupted cleanup is replayable."""
+        with self._lock:
+            with closing(sqlite3.connect(self.database)) as db, db:
+                db.execute('BEGIN IMMEDIATE')
+                row = db.execute('SELECT status, stored_name FROM documents WHERE document_id=?', (document_id,)).fetchone()
+                if row is None:
+                    raise DocumentError('document_not_found', 'Unknown document ID.', 404)
+                if row[0] not in {'trashed', 'deleting'}:
+                    raise DocumentError('document_not_trashed', 'Move the document to Trash before deleting it.', 409)
+                if row[0] == 'trashed':
+                    db.execute('INSERT INTO document_deletions VALUES (?,?)', (document_id, row[1]))
+                    db.execute("UPDATE documents SET status='deleting', updated_at=? WHERE document_id=?", (self._now(), document_id))
+                    if self.lifecycle is not None:
+                        self.lifecycle.document_deleted(db, document_id)
+                    if self.derived is not None:
+                        self.derived.invalidate_deleted(db, document_id)
+            self._finish_deletion(document_id)
+            return {'deleted': 1}
+
+    def _finish_deletion(self, document_id):
+        with closing(sqlite3.connect(self.database)) as db, db:
+            row = db.execute('SELECT stored_name FROM document_deletions WHERE document_id=?', (document_id,)).fetchone()
+            if row is None:
+                return
+            path = (self.uploads / row[0]).resolve()
+            if path.parent != self.uploads.resolve():
+                raise DocumentError('storage_unavailable', 'Invalid stored file location.', 503)
+            # The durable intent survives both unlink failure and a later SQL rollback.
+            path.unlink(missing_ok=True)
+            self._csv.clear(db, document_id)
+            self._pdf.clear(db, document_id)
+            for table in ('pdf_fts', 'document_artifacts', 'document_parses', 'document_trash', 'documents', 'document_deletions'):
+                db.execute(f'DELETE FROM {table} WHERE document_id=?', (document_id,))
+        self._published.pop(document_id, None)
+        self._csv_ready.discard(document_id)
+
+    def recover_deletions(self):
+        with closing(sqlite3.connect(self.database)) as db:
+            pending = db.execute('SELECT document_id FROM document_deletions').fetchall()
+        for (document_id,) in pending:
+            self._finish_deletion(document_id)
 
     def start(self, processor=None):
         """One worker per service/process. Restore completed data before serving."""
@@ -214,8 +259,13 @@ class DocumentService:
                 raise RuntimeError('Document service cannot be started twice')
             self._processor = processor if processor is not None else DocumentProcessor()
             self.recover_receiving()
+            self.recover_deletions()
             with closing(sqlite3.connect(self.database)) as db, db:
+                interrupted = db.execute("SELECT document_id FROM documents WHERE status IN ('queued','processing')").fetchall()
                 db.execute("UPDATE documents SET status='failed', stage='failed', error_code='processing_interrupted', updated_at=? WHERE status IN ('queued','processing')", (self._now(),))
+                if self.lifecycle is not None:
+                    for (document_id,) in interrupted:
+                        self.lifecycle.document_changed(db, document_id)
                 ready = db.execute("SELECT document_id FROM documents WHERE status='ready' OR document_id IN (SELECT document_id FROM document_trash WHERE previous_status='ready')").fetchall()
                 # Rebuild only from validated, published artifacts before serving.
                 db.execute('DELETE FROM pdf_fts')
@@ -244,7 +294,11 @@ class DocumentService:
         with self._lock:
             self._stop.set()
             with closing(sqlite3.connect(self.database)) as db, db:
+                interrupted = db.execute("SELECT document_id FROM documents WHERE status IN ('queued','processing')").fetchall()
                 db.execute("UPDATE documents SET status='failed', stage='failed', error_code='processing_interrupted', updated_at=? WHERE status IN ('queued','processing')", (self._now(),))
+                if self.lifecycle is not None:
+                    for (document_id,) in interrupted:
+                        self.lifecycle.document_changed(db, document_id)
         if self._thread is not None:
             self._thread.join(timeout=2)
         # Providers must eventually honor timeouts/stop. Threads cannot be force-killed.
@@ -260,6 +314,8 @@ class DocumentService:
                        (code, self._now(), document_id))
             db.execute("UPDATE document_trash SET previous_status='failed' WHERE document_id=?", (document_id,))
             db.execute("UPDATE documents SET stage='failed', error_code=?, updated_at=? WHERE document_id=? AND status='trashed'", (code, self._now(), document_id))
+            if self.lifecycle is not None:
+                self.lifecycle.document_changed(db, document_id)
             self._published.pop(document_id, None)
             self._csv_ready.discard(document_id)
             db.execute('DELETE FROM pdf_fts WHERE document_id=?', (document_id,))
@@ -323,6 +379,8 @@ class DocumentService:
                             changed = db.execute("UPDATE documents SET status='ready', stage='ready', error_code=NULL, updated_at=? WHERE document_id=? AND status='processing'", (self._now(), document_id)).rowcount
                             if not changed:
                                 raise ProcessingFailure('processing_interrupted')
+                            if self.lifecycle is not None:
+                                self.lifecycle.document_ready(db, document_id)
                         self._published[document_id] = (prepared, index)
                     continue
                 if isinstance(prepared, ParsedCsvDocument):
@@ -334,6 +392,8 @@ class DocumentService:
                             continue
                         with closing(sqlite3.connect(self.database)) as db, db:
                             changed = db.execute("UPDATE documents SET status='ready', stage='ready', error_code=NULL, updated_at=? WHERE document_id=? AND status='processing'", (self._now(), document_id)).rowcount
+                            if changed and self.lifecycle is not None:
+                                self.lifecycle.document_ready(db, document_id)
                         if changed:
                             self._csv_ready.add(document_id)
                     continue
@@ -348,7 +408,11 @@ class DocumentService:
                         continue
                     with closing(sqlite3.connect(self.database)) as db, db:
                         db.execute('INSERT OR REPLACE INTO document_artifacts VALUES (?,?)', (document_id, payload))
-                        db.execute("UPDATE documents SET status='ready', stage='ready', error_code=NULL, updated_at=? WHERE document_id=? AND status='processing'", (self._now(), document_id))
+                        changed = db.execute("UPDATE documents SET status='ready', stage='ready', error_code=NULL, updated_at=? WHERE document_id=? AND status='processing'", (self._now(), document_id)).rowcount
+                        if not changed:
+                            raise ProcessingFailure('processing_interrupted')
+                        if self.lifecycle is not None:
+                            self.lifecycle.document_ready(db, document_id)
                     self._published[document_id] = (prepared, index)
             except Exception as exc:
                 try:
@@ -375,6 +439,8 @@ class DocumentService:
             if count >= self.max_documents:
                 raise DocumentError('document_limit_reached', 'The workspace has no free document slots.', 409)
             db.execute("UPDATE documents SET status='queued', stage='queued', error_code=NULL, updated_at=? WHERE document_id=?", (self._now(), document_id))
+            if self.lifecycle is not None:
+                self.lifecycle.document_changed(db, document_id)
             db.execute('DELETE FROM document_parses WHERE document_id=?', (document_id,))
             self._csv.clear(db, document_id)
             self._pdf.clear(db, document_id)
