@@ -15,6 +15,7 @@ export type Task = {run_id: string; session_id: string; request_id: string; ques
   artifacts?: {artifact_id:string; kind:string}[];
   source_available?: boolean;
   clarification?: string | null; created_at?: number; answer: Answer | null;
+  partial_answer?: Answer | null;
   error: {code: string; message: string} | null};
 export type Turn = {body: Submission; question_id?: string; task?: Task; error?: string;
   session_id?: string;

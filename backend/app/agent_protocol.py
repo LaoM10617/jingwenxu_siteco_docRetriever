@@ -20,10 +20,14 @@ class DocumentVersion(ProtocolModel):
     version_id: Identifier
 
 
-class ScopeSnapshot(ProtocolModel):
+class SourceScope(ProtocolModel):
     documents: tuple[DocumentVersion, ...]
     purpose: str | None = None
     filters: tuple[str, ...] = ()
+
+
+class ScopeSnapshot(SourceScope):
+    dependency_scopes: tuple[SourceScope, ...] = ()
 
 
 class TaskIdentity(ProtocolModel):
@@ -45,6 +49,18 @@ class ResolvedReference(ProtocolModel):
     description: str
 
 
+class ProductIdentifier(ProtocolModel):
+    value: Identifier
+    evidence_ids: tuple[Identifier, ...] = Field(min_length=1)
+
+
+class EvidenceDescriptor(ProtocolModel):
+    evidence_id: Identifier
+    source: DocumentVersion
+    location: Identifier
+    scope: ScopeSnapshot
+
+
 class TaskPackage(TaskIdentity):
     protocol_version: Literal[1] = 1
     objective: Annotated[str, Field(min_length=1)]
@@ -53,15 +69,28 @@ class TaskPackage(TaskIdentity):
     scope: ScopeSnapshot
     resolved_references: tuple[ResolvedReference, ...] = ()
     input_artifacts: tuple[Identifier, ...] = ()
+    extract_product_identifiers: bool = False
+    product_identifiers: tuple[ProductIdentifier, ...] = ()
+    dependency_evidence: tuple[EvidenceDescriptor, ...] = ()
     constraints: tuple[str, ...] = ()
     budget: ExecutionBudget = Field(default_factory=ExecutionBudget)
 
-
-class EvidenceDescriptor(ProtocolModel):
-    evidence_id: Identifier
-    source: DocumentVersion
-    location: Identifier
-    scope: ScopeSnapshot
+    @model_validator(mode='after')
+    def check_dependency_evidence(self):
+        allowed = {source for scope in self.scope.dependency_scopes for source in scope.documents}
+        if any(item.source not in allowed for item in self.dependency_evidence):
+            raise ValueError('dependency evidence exceeds dependency scope')
+        for evidence in self.dependency_evidence:
+            if not any(evidence.source in scope.documents
+                       and set(evidence.scope.documents) <= set(scope.documents)
+                       and evidence.scope.purpose == scope.purpose
+                       and set(scope.filters) <= set(evidence.scope.filters)
+                       for scope in self.scope.dependency_scopes):
+                raise ValueError('dependency evidence purpose or filters differ from dependency scope')
+        evidence_ids = {item.evidence_id for item in self.dependency_evidence}
+        if any(not set(item.evidence_ids) <= evidence_ids for item in self.product_identifiers):
+            raise ValueError('product references unknown dependency evidence')
+        return self
 
 
 class ArtifactDescriptor(ProtocolModel):
@@ -93,6 +122,7 @@ class TaskResult(TaskIdentity):
     findings: tuple[Finding, ...] = ()
     evidence_refs: tuple[EvidenceDescriptor, ...] = ()
     artifact_refs: tuple[ArtifactDescriptor, ...] = ()
+    product_identifiers: tuple[ProductIdentifier, ...] = ()
     coverage: tuple[Coverage, ...] = ()
     gaps: tuple[str, ...] = ()
     clarification: str | None = None
@@ -133,7 +163,8 @@ def validate_result(task: TaskPackage, result: TaskResult) -> TaskResult:
     for field in TaskIdentity.model_fields:
         if getattr(task, field) != getattr(result, field):
             raise ValueError('result identity does not match task')
-    allowed = set(task.scope.documents)
+    dependencies = {source for scope in task.scope.dependency_scopes for source in scope.documents}
+    allowed = set(task.scope.documents) | dependencies
     for descriptor in (*result.evidence_refs, *result.artifact_refs):
         scope = descriptor.scope
         if (not set(scope.documents) <= allowed or scope.purpose != task.scope.purpose
@@ -149,4 +180,12 @@ def validate_result(task: TaskPackage, result: TaskResult) -> TaskResult:
     for finding in result.findings:
         if not set(finding.evidence_ids) <= evidence_ids or not set(finding.artifact_ids) <= artifact_ids:
             raise ValueError('finding references unknown evidence or artifact')
+    for product in result.product_identifiers:
+        if not set(product.evidence_ids) <= evidence_ids:
+            raise ValueError('product references unknown evidence')
+    for artifact in result.artifact_refs:
+        if not dependencies <= set(artifact.scope.documents):
+            raise ValueError('artifact omits dependency sources')
+        if artifact.scope.dependency_scopes != task.scope.dependency_scopes:
+            raise ValueError('artifact dependency scopes do not match task')
     return result

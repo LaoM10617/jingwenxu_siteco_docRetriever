@@ -25,7 +25,7 @@ function Controls({turn,control}:{turn:Turn;control:(t:Turn,a:'stop'|'resume',re
 export default function ChatThread({turns,retry,refresh,control}:{turns:Turn[];retry:(t:Turn)=>Promise<void>;
   refresh:()=>void;control:(t:Turn,a:'stop'|'resume',reply?:string)=>Promise<void>}) {
   return <section className="chat-thread" aria-label="Conversation">{turns.map(turn=> {
-    const task=turn.task, answer=task?.answer;
+    const task=turn.task, answer=task?.answer ?? task?.partial_answer;
     return <article className="chat-turn" key={turn.body.request_id}>
       <div className="user-question"><h2>You</h2><p>{turn.body.question}</p>
         {!!turn.names.length && <p className="muted">Materials: {turn.names.join(', ')}</p>}</div>
@@ -36,6 +36,7 @@ export default function ChatThread({turns,retry,refresh,control}:{turns:Turn[];r
       {task?.error && <p role="alert">{task.error.message}</p>}
       <Controls turn={turn} control={control}/>
       {answer && <div className="model-answer"><h2>{answer.outcome === 'answered' ? 'Answer' : answer.outcome}</h2>
+        {!task?.answer && task?.partial_answer && <p role="status" className="answer-gap">Partial results only. The task has not finished; resume or answer the clarification to continue.</p>}
         {task?.source_available === false && <p role="status" className="answer-gap">Sources for this historical answer are no longer available in this session. It cannot be reused as current evidence.</p>}
         {answer.segments.map((segment,i)=><div key={i}><p>{segment.text}</p>
           {segment.citation_ids.map(id=>{const source=answer.citations.find(c=>c.citation_id===id);

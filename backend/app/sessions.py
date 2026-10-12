@@ -269,9 +269,11 @@ class SessionStore:
                 for key in ('snapshot_id', 'session_id', 'request_id', 'scope', 'data_version', 'rule_version')}
 
     def snapshot(self, session_id, request_id, *, purpose=None, explicit_sources=None,
-                 expected_data_version, expected_rule_version, filters=()):
+                 expected_data_version, expected_rule_version, filters=(), dependency_scopes=()):
         explicit_sources = None if explicit_sources is None else tuple(dict.fromkeys(explicit_sources))
-        encoded = _json({'purpose': purpose, 'filters': filters, 'explicit_sources': None if explicit_sources is None else
+        encoded = _json({'purpose': purpose, 'filters': filters,
+                         'dependency_scopes': [scope.model_dump(mode='json') for scope in dependency_scopes],
+                         'explicit_sources': None if explicit_sources is None else
                          [ref.model_dump() for ref in explicit_sources], 'data_version': expected_data_version,
                          'rule_version': expected_rule_version})
         with self._db(write=True) as db:
@@ -285,7 +287,8 @@ class SessionStore:
             self._check_version(row, 'data_version', expected_data_version)
             self._check_version(row, 'rule_version', expected_rule_version)
             scope = self._scope(db, session_id, purpose, explicit_sources)
-            scope = ScopeSnapshot(documents=scope.documents, purpose=scope.purpose, filters=tuple(filters))
+            scope = ScopeSnapshot(documents=scope.documents, purpose=scope.purpose, filters=tuple(filters),
+                                  dependency_scopes=tuple(dependency_scopes))
             snapshot_id = uuid4().hex
             db.execute('INSERT INTO turn_snapshots VALUES (?, ?, ?, ?, ?, ?, ?)',
                        (snapshot_id, session_id, request_id, encoded, scope.model_dump_json(),

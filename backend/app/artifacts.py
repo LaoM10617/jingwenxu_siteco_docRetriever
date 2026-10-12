@@ -72,7 +72,8 @@ class ArtifactStore:
             accepted = self._snapshot(db, sid, snapshot_id)
             scope = accepted if scope is None else scope
             if (not set(scope.documents) <= set(accepted.documents)
-                    or scope.purpose != accepted.purpose or not set(accepted.filters) <= set(scope.filters)):
+                    or scope.purpose != accepted.purpose or not set(accepted.filters) <= set(scope.filters)
+                    or scope.dependency_scopes != accepted.dependency_scopes):
                 raise DocumentError('invalid_artifact_scope', 'Artifact exceeds the accepted scope.', 422)
             old = db.execute('SELECT * FROM artifact_records WHERE session_id=? AND artifact_id=?',
                              (sid, artifact_id)).fetchone()
@@ -139,7 +140,8 @@ class ArtifactStore:
         # Exact scope/filters/purpose: changing the computation population needs
         # a new computation, even if all old input files still exist.
         if (row['invalidated'] or set(previous.documents) != set(current.documents)
-                or previous.purpose != current.purpose or previous.filters != current.filters):
+                or previous.purpose != current.purpose or previous.filters != current.filters
+                or set(previous.dependency_scopes) != set(current.dependency_scopes)):
             raise DocumentError('artifact_not_reusable', 'Result does not match the current source scope.', 409)
         self.sessions.validate_sources(db, row['session_id'], current.documents)
         return self._view(db, row)

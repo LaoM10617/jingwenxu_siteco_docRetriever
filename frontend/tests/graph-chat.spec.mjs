@@ -67,6 +67,16 @@ test('clarification requires a reply and posts it to the same durable run', asyn
   expect(state.legacy).toBe(0);
 });
 
+test('failed dependent task displays partial evidence and still offers explicit resume', async ({page}) => {
+  const state = await mockGraph(page,[run('failed',{partial_answer:{...answer,outcome:'partial'},
+    error:{code:'specialist_failed',message:'The CSV step could not finish.'}})]);
+  await page.goto('/');
+  await expect(page.locator('.model-answer')).toContainText('Hello from the saved session.');
+  await expect(page.locator('.model-answer')).toContainText('Partial results only.');
+  await expect(page.getByRole('button',{name:'Resume task',exact:true})).toBeVisible();
+  expect(state.requests).toHaveLength(0);
+});
+
 test('running work can be stopped and resumed explicitly', async ({page}) => {
   const state = await mockGraph(page,[run('running')]);
   await page.goto('/');

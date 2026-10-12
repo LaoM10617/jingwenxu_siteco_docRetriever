@@ -1,12 +1,13 @@
 """Task-local PDF graph reusing the validated retrieval and numerical tools."""
 from copy import deepcopy
 import json
+import re
 import time
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from app.agent_protocol import (Coverage, EvidenceDescriptor, Finding, TaskPackage,
+from app.agent_protocol import (Coverage, EvidenceDescriptor, Finding, ProductIdentifier, TaskPackage,
                                 TaskResult, validate_result)
 from app.documents import DocumentError
 from app.answers import AnswerService
@@ -33,11 +34,40 @@ class _Budget:
 
 
 class _Model:
-    def __init__(self, model, budget, task_id):
+    def __init__(self, model, budget, task_id, extract_products=False):
         self.delegate, self.budget = model, budget
         self.task_id = task_id
         self.provider = model.provider
         self.model = model.model
+        self.extract_products = extract_products
+        self.products = []
+
+    def _request(self, system, payload, schema):
+        if self.extract_products:
+            system += (' You are the PDF specialist in a dependent PDF-to-CSV task. '
+                'Complete only the PDF product selection, properties and evidence portion. '
+                'The downstream CSV specialist is responsible for prices/calculations. '
+                'CSV absence here is expected, not a PDF gap or clarification reason. '
+                'Preserve the user constraints that apply to your PDF role.')
+        if self.extract_products and payload['phase'] == 'pdf_read':
+            system += (' Preserve the exact article/order/product identifiers matching the requested '
+                'conditions in findings text with source evidence IDs, including leading zeros. '
+                'Do not omit identifiers needed for subsequent CSV matching or infer absent identifiers.')
+        if not self.extract_products or payload['phase'] not in ('answer', 'answer_after_tools', 'pdf_synthesis'):
+            return system, schema
+        schema = deepcopy(schema)
+        schema['properties']['product_identifiers'] = {'type': 'array', 'maxItems': 100,
+            'items': {'type': 'object', 'additionalProperties': False,
+                'properties': {'value': {'type': 'string', 'minLength': 1},
+                    'evidence_ids': {'type': 'array', 'minItems': 1, 'items': {'type': 'string'}}},
+                'required': ['value', 'evidence_ids']}}
+        schema['required'].append('product_identifiers')
+        system += (' Return product_identifiers for products matching the requested conditions. '
+            'Copy explicit article/order/product identifiers exactly as strings, preserving leading zeros. '
+            'Each identifier must occur literally in its cited source and in a grounded finding/segment. '
+            'Use the same evidence/citation IDs as the answer. Do not invent or infer missing IDs; '
+            'return [] and explain the gap when ownership or selection is ambiguous.')
+        return system, schema
 
     def _payload(self, payload):
         phase = payload['phase']
@@ -51,12 +81,17 @@ class _Model:
             raise DocumentError('task_budget_exhausted', 'The PDF task model budget was reached.', 409)
         if not cached:
             self.budget.calls_left -= 1
+        system, schema = self._request(system, payload, schema)
         result = self.delegate.generate(system, self._payload(payload), schema, budget)
+        if self.extract_products and 'product_identifiers' in schema.get('properties', {}):
+            result = deepcopy(result)
+            self.products = result.pop('product_identifiers', [])
         self.budget.check()
         return result
 
     def has_receipt(self, system, payload, schema):
         check = getattr(self.delegate, 'has_receipt', None)
+        system, schema = self._request(system, payload, schema)
         return bool(check and check(system, self._payload(payload), schema))
 
     def remaining_calls(self):
@@ -101,7 +136,7 @@ class PdfSpecialist:
         budget = _Budget(budget, task.budget)
         if task.budget.max_steps < 3:
             raise DocumentError('task_budget_exhausted', 'The PDF task requires three graph steps.', 409)
-        model = _Model(self.answers.model, budget, task.task_id)
+        model = _Model(self.answers.model, budget, task.task_id, task.extract_product_identifiers)
         def validate(state):
             budget.check()
             if task.specialist != 'pdf' or not task.scope.documents:
@@ -133,7 +168,7 @@ class PdfSpecialist:
 
         def collect(state):
             validate(state)
-            return {'output': self._collect(task, state['answer'])}
+            return {'output': self._collect(task, {**state['answer'], 'product_identifiers': model.products})}
 
         builder = StateGraph(_State)
         builder.add_node('validate_sources', validate)
@@ -170,11 +205,26 @@ class PdfSpecialist:
         status = {'answered': 'completed', 'needs_clarification': 'clarification'}.get(answer['outcome'], 'partial')
         gaps = tuple(answer['gaps'])
         clarification = (' '.join(gaps) or 'Please clarify which fact or product to look up.') if status == 'clarification' else None
+        products = []
+        if task.extract_product_identifiers:
+            citations = {c['citation_id']: c for c in answer['citations']}
+            for raw in answer.get('product_identifiers', []):
+                try:
+                    product = ProductIdentifier.model_validate_json(json.dumps(raw))
+                except ValueError:
+                    raise DocumentError('invalid_pdf_products', 'PDF product identifiers are malformed.', 502) from None
+                # Boundary checks reject substring matches such as 001 inside 1001.
+                pattern = r'(?<![\w-])' + re.escape(product.value) + r'(?![\w-])'
+                if any(identity not in citations or not re.search(pattern, citations[identity].get('text', ''))
+                       for identity in product.evidence_ids):
+                    raise DocumentError('invalid_pdf_products', 'PDF product identifier is not present in its cited source.', 502)
+                products.append(ProductIdentifier(value=product.value, evidence_ids=tuple(
+                    f'{task.task_id}:{identity}' for identity in product.evidence_ids)))
         result = TaskResult(session_id=task.session_id, turn_id=task.turn_id, run_id=task.run_id,
             task_id=task.task_id, status=status,
             findings=tuple(Finding(text=segment['text'], evidence_ids=tuple(
                 f"{task.task_id}:{identity}" for identity in segment['citation_ids'])) for segment in answer['segments']),
-            evidence_refs=tuple(descriptors), gaps=gaps, clarification=clarification,
+            evidence_refs=tuple(descriptors), product_identifiers=tuple(products), gaps=gaps, clarification=clarification,
             coverage=tuple(Coverage.model_validate_json(json.dumps(item)) for item in answer['coverage'])
                 if 'coverage' in answer else tuple(Coverage(source=ref, processed=tuple(
                     item.evidence_id for item in descriptors if item.source == ref)) for ref in task.scope.documents))

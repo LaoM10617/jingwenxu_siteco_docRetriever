@@ -145,3 +145,20 @@ def test_changed_filter_requires_recomputation(workspace):
         expected_rule_version=state['rule_version'], filters=('Listenpreis < 10',))
     assert artifacts.cached(sid, 'sum', filtered['snapshot_id']) is None
     assert filtered['scope']['filters'] == ['Listenpreis < 10']
+
+
+def test_dependency_purpose_change_prevents_public_reuse_and_cache_hit(workspace):
+    from app.agent_protocol import SourceScope
+    _, sessions, artifacts, sid, storage_id = workspace
+    source = DocumentVersion(document_id=storage_id, version_id=storage_id)
+    state = sessions.get(sid)
+    def make(identity, purpose):
+        return sessions.snapshot(sid, identity, purpose='price',
+            dependency_scopes=(SourceScope(documents=(source,), purpose=purpose),),
+            expected_data_version=state['data_version'], expected_rule_version=state['rule_version'])
+    original = make('original', 'selection')
+    artifacts.publish(sid, 'result', original['snapshot_id'], kind='numeric', payload={'value': 1}, cache_key='k')
+    changed = make('changed', 'other-selection')
+    with pytest.raises(DocumentError, match='current source scope'):
+        artifacts.reuse(sid, 'result', changed['snapshot_id'])
+    assert artifacts.cached(sid, 'k', changed['snapshot_id']) is None

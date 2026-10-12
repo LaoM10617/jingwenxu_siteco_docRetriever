@@ -1,12 +1,12 @@
 # Agent 产品化升级实施计划
 
-日期：2026-10-12。状态：A–D 已完成各自既定范围的实现、测试、真实验证与审查；E 尚未开始。本轮停在 D，未部署到旧运行容器、未 commit/push。
+日期：2026-10-12。状态：A–F 已完成各自既定范围；F 代码、测试、真实恢复链路及双轴审查已完成，限制见阶段日志。接手基线 main / 816211b，与本地 origin/main 一致、工作区干净。运行容器仍为旧代码；本轮不 commit/push。
 
 ## 1. 使用方式与授权
 
 先读 AGENTS.md 和 decisions-design.md。本文件只安排执行、测试和交接，设计含义以 decisions-design.md 为准。后续更新当前进度，不将计划项标成完成事实；过长时拆阶段 Log 并保留链接。
 
-用户最新要求逐步完成 D、E，本轮先实施 D。允许按需子 Agent、既定设计内自主实现修复和小规模真实 API 验证。commit/push 等用户主动要求。影响或风险较大的新增依赖、框架及部署方案按 AGENTS.md 先讨论；用户已确认宿主 worker 主动领取、隔离 pandas 执行与 CSV 子图按需 review，现已落地。SQLite 分库与幂等恢复不变，后端及执行容器均不挂 Docker socket。设计见 decisions-design.md 第 14、17 节。
+用户最新要求完成 F，允许按需子 Agent、既定设计内自主实现修复和小规模真实 API 验证。commit/push 等用户主动要求。影响或风险较大的新增依赖、框架及部署方案按 AGENTS.md 先讨论；已确认的宿主 worker 主动领取、隔离 pandas、SQLite 分库与幂等恢复不变，后端及执行容器均不挂 Docker socket。保持每个交互轮最多六次模型调用，接受明确部分结果。设计见 decisions-design.md 第 14、17–19 节。
 
 本轮没有要求创建新对话或发送消息。旧项目不访问、不修改。
 
@@ -152,6 +152,8 @@
 
 依赖：C–E。
 
+当前：F 既定范围已完成。Windows/Linux 最终全量各 554 passed、15 skipped、10 subtests passed；前端构建及浏览器 10 项通过。真实 Gemini/Voyage/PDF→CSV/隔离 pandas 长会话恢复链路已验证，双轴审查无未解决阻塞项。真实验证是同一会话跨修复续跑，非最终版本从零一次通过；历史 partial 及摘要语义限制保留。测试沿用第 4 节既定接口。详见 [stage-f-log.md](stage-f-log.md)。
+
 - 完善近期消息、交互摘要、来源事实和产物引用的上下文组装。
 - 范围/用途变化后重新判断事实与产物适用性，不靠旧摘要继承失效证据。
 - 完成有依赖任务、PDF→CSV 产品映射、多轮筛选/改图、部分失败及补充任务。
@@ -186,10 +188,10 @@ UI 视觉重构与开发者标签页属于后续产品阶段。当前旧 UI 能�
 
 ## 14. 当前交接快照
 
-- A/B/C/D/E 均已完成既定范围的实施、验证与审查；F–G 未开始。分阶段证据见 stage-a-log.md、stage-b-log.md、[stage-c-log.md](stage-c-log.md)、[stage-d-log.md](stage-d-log.md)、[stage-e-log.md](stage-e-log.md)。
-- 本轮接手实测 main / e389512，HEAD 与本地 origin/main 一致，初始工作区干净。用户确认该提交已推送；本轮未执行 fetch、commit 或 push。只有 AGENTS.md 被 Git 忽略；设计、计划及 C 日志均已跟踪。旧记录的未提交状态仅代表当时交接。
-- 新页面和 `/api/sessions/{sid}/runs` 已接主图/PDF/CSV 图，支持来源规则、追问、澄清、停止、显式恢复、持久回答和结果表/图。旧 `/api/questions`、question_tasks.py 与旧 TTL memory 已退役；有效检索和确定性计算模块保留。
-- D 最终 Windows / Linux 全量各 471 passed、15 skipped、10 subtests passed；15 项 Docker 用例另行实测通过。前端构建通过，浏览器新图、产物及设置 9 passed。LangGraph 1.2.14 临时子图 durability 提示及兼容处理见 D Log。
-- 用户明确授权一次具体 PDF + Gemini/Voyage 实测，真实 HTTP 到图到引用回答通过；3 页引用已渲染核对。Groq、本阶段 rerank 未实测。记录在 data/stage-c/20261012T145256771671Z/receipt.json，原 4 份文件摘要未变。
-- 原 Docker 前后端继续 healthy，未部署新代码或迁移其 data/docker-e2e；独立验证副本、阶段 C 测试镜像和配置项见 C Log。临时服务已停止。
-- D 全部变更仍未提交：通用 CSV、完整快照、受控 pandas 专业图、主动领取 worker/恢复、产物分页/图表、旧入口退役、回归/真实探针与文档。真实三轮回执 `data/stage-d/20261012T174750760175Z/receipt.json`；严格运行中故障回执 `data/stage-d/worker-recovery-20261012T174157758689Z/receipt.json`。固定镜像及启动配置见 runner/README.md 和 D Log。D 后的 E 已完成（见 E Log）；下一步入口为 F，不重开已确认 worker/pandas 方案；后续视觉页面、开发者标签页、复杂长会话未开始。
+- 分支 `main`，HEAD 与本地 origin/main 为 `816211b`；接手工作区干净，用户确认该提交已推送。本轮 F 改动均未提交，未 fetch/commit/push。
+- A–E 既定范围已完成；D/E 日志中 e389512 和“未提交”是当时历史状态。F 代码已实现、最终跨平台回归通过、真实恢复链路及双轴审查完成；G 未开始。
+- F 新增持久交互摘要、有限上下文与产物适用性、有依赖 PDF→CSV、上游选择复用、明确部分结果及恢复语义。实现及最终证据入口为 [stage-f-log.md](stage-f-log.md)，设计权威见 decisions-design.md 第 19 节。
+- 现有前端支持 session/run、澄清/停止/恢复、来源预览与分页表/图；F 仅补部分结果展示。视觉改版、独立开发者标签页、后台主动探索仍未实施。
+- 两个 `document-chat-*` 旧容器未重建或部署新架构；独立 F 服务/worker 和 `data/stage-f/` 用于验证。执行镜像沿用 D 固定 pandas digest，启动配置见 runner/README.md。
+- 单轮六次模型调用硬限保持；新的明确澄清回复和显式失败重试各自有有界预算与累计审计，重启/普通停止恢复不自动增加额度或付费。PDF/CSV 同时保留选品和价格用途依赖。
+- 历史阶段证据继续保存在 stage-a-log.md、stage-b-log.md、stage-c-log.md、stage-d-log.md、stage-e-log.md；不以模拟测试或旧容器 healthy 代替 F 的真实验证。

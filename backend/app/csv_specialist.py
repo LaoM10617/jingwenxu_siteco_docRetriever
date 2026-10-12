@@ -29,6 +29,11 @@ class Chart(_Schema):
     title: str = Field(max_length=300)
 
 
+class ProductKey(_Schema):
+    version_id: str = Field(min_length=1)
+    column: str = Field(min_length=1)
+
+
 class Plan(_Schema):
     action: Literal['compute', 'clarify', 'reuse_chart']
     clarification: str | None
@@ -44,6 +49,8 @@ class Plan(_Schema):
     script: str = Field(max_length=50000)
     reuse_artifact_id: str | None
     chart: Chart | None
+    product_key_columns: list[ProductKey] = Field(default_factory=list)
+    duplicate_product_policy: Literal['reject', 'all_matches'] = 'reject'
 
     @model_validator(mode='after')
     def valid_action(self):
@@ -83,6 +90,8 @@ load_artifacts() 读取 /inputs/artifacts.json，返回 {artifact_id:DataFrame}�
 只使用可用输入和pandas/标准库，不能安装包、访问网络或宿主。代码执行正确性仍需审查，不可声称全部已证明。
 简单改图且数据/计算口径不变可action=reuse_chart，引用提供的artifact_id；此时operations=['chart']，filters/group_by/aggregations/joins=[]，script=''。新筛选/分组/聚合必须compute，不能复用旧数值。
 计划operations、filters、group_by、aggregations、joins、null_policy、numeric_formats、unit、assumptions必须如实记录脚本口径。
+product_identifiers 非空时是PDF已取证的精确产品标识。product_key_columns 为每张输入CSV指定明确的产品编号列(version_id,column)，不以相似列或样例猜测业务键。宿主将在完整原表精确匹配字符串并只向脚本交付匹配行；脚本不要再次猜测/转换编号。键含义不明确则clarify；不允许此时reuse_chart。无产品依赖时product_key_columns=[]。
+duplicate_product_policy 默认reject；仅当用户明确要求保留重复编号的所有匹配原始行时设置all_matches，此时不得去重或选取第一行。未找到精确标识仍须澄清，不用相似编号替代。
 '''
 
 
@@ -97,7 +106,9 @@ class _State(TypedDict, total=False):
     error: str | None
     review: dict
     reviewed_attempt: int
+    review_pending: bool
     output: dict
+    product_mapping: list
 
 
 class _Budget:
@@ -168,6 +179,8 @@ def _calculation_summary(value):
     except (ValueError, TypeError):
         return {'description': str(value or '')[:1000]}
     result = {}
+    if isinstance(saved, dict):
+        result['review_complete'] = saved.get('review_complete', True)
     for key in ('operations', 'filters', 'group_by', 'aggregations', 'joins', 'null_policy', 'numeric_formats', 'unit', 'assumptions'):
         field = plan.get(key)
         result[key] = [str(v)[:300] for v in field[:20]] if isinstance(field, list) else str(field)[:1000] if field is not None else None
@@ -181,9 +194,12 @@ class CsvSpecialist:
     def execute(self, task: TaskPackage, budget):
         budget = _Budget(budget, task.budget)
         documents = self.answers.tools.documents
+        dependency_sources = tuple(dict.fromkeys(ref for scope in task.scope.dependency_scopes
+                                                for ref in scope.documents))
         def available():
             budget.check()
-            if documents.lifecycle is None or not documents.lifecycle.available(task.session_id, task.scope.documents):
+            sources = tuple(dict.fromkeys((*task.scope.documents, *dependency_sources)))
+            if documents.lifecycle is None or not documents.lifecycle.available(task.session_id, sources):
                 raise DocumentError('source_unavailable', 'CSV task sources are unavailable.', 409)
         def generate(phase, payload, schema):
             budget.check()
@@ -193,6 +209,7 @@ class CsvSpecialist:
             raw = self.answers.model.generate(SYSTEM, {'phase': phase, 'task_id': task.task_id,
                 'objective': task.objective, 'constraints': list(task.constraints),
                 'scope': task.scope.model_dump(mode='json'),
+                'product_identifiers': [p.model_dump(mode='json') for p in task.product_identifiers],
                 'resolved_references': [r.model_dump() for r in task.resolved_references], **payload},
                 schema.model_json_schema(), budget)
             budget.check()
@@ -227,7 +244,9 @@ class CsvSpecialist:
                         raise DocumentError('artifact_not_reusable',
                             'Reference the result table underlying this chart or answer to continue CSV analysis.', 409)
                     if (not item['source_available'] or item['invalidated']
-                            or set(previous.documents) != set(task.scope.documents)
+                            or set(previous.documents) != (set(task.scope.documents)
+                                | set(dependency_sources))
+                            or previous.dependency_scopes != task.scope.dependency_scopes
                             or previous.filters != task.scope.filters or previous.purpose != task.scope.purpose):
                         raise DocumentError('artifact_not_reusable',
                             'The referenced result is unavailable or does not match the current source scope.', 409)
@@ -241,7 +260,39 @@ class CsvSpecialist:
                 'examples': [[v[:200] if isinstance(v, str) else v for v in row]
                              for row in a['payload']['rows'][:3]], 'examples_only': True}
                 for a in state['reusable']]
-            return {'plan': generate('csv_plan', {'overview': state['overview'], 'artifacts': prior}, Plan)}
+            current = generate('csv_plan', {'overview': state['overview'], 'artifacts': prior}, Plan)
+            if not task.product_identifiers or current['action'] == 'clarify':
+                return {'plan': current}
+            keys = {key['version_id']: key['column'] for key in current['product_key_columns']}
+            table_ids = {table['source']['version_id'] for table in state['tables']}
+            reason = None
+            if (current['action'] != 'compute' or len(keys) != len(current['product_key_columns'])
+                    or set(keys) != table_ids):
+                reason = 'Please specify one unambiguous product identifier column for each CSV source.'
+            selected, mapping = [], []
+            for table in state['tables'] if reason is None else []:
+                column = keys[table['source']['version_id']]
+                if column not in table['headers']:
+                    reason = f'Which product identifier column should be used in {table["original_filename"]}?'
+                    break
+                index = table['headers'].index(column)
+                rows = []
+                for value in dict.fromkeys(p.value for p in task.product_identifiers):
+                    matches = [row for row in table['rows'] if row['values'][index] == value]
+                    if not matches or (len(matches) > 1 and current['duplicate_product_policy'] == 'reject'):
+                        reason = (f'Product identifier {value!r} has {len(matches)} exact matches in '
+                            f'{table["original_filename"]}.{column}; clarify the identifier or duplicate-row policy.')
+                        break
+                    rows.extend(matches)
+                if reason:
+                    break
+                selected.append({**table, 'rows': rows})
+                mapping.append({'source': table['source'], 'column': column,
+                    'input_row_count': len(table['rows']), 'matched_row_ids': [row['row_id'] for row in rows],
+                    'identifiers': list(dict.fromkeys(p.value for p in task.product_identifiers))})
+            if reason:
+                return {'plan': {**current, 'action': 'clarify', 'clarification': reason}}
+            return {'plan': current, 'tables': selected, 'product_mapping': mapping}
         def build_execute(state):
             budget.step()
             available()
@@ -287,13 +338,19 @@ class CsvSpecialist:
             return 'review' if needs_review and state.get('reviewed_attempt') != state['attempts'] else 'collect'
         def review(state):
             budget.step()
-            decision = generate('csv_review', {'plan': state['plan'], 'overview': state['overview'],
+            payload = {'plan': state['plan'], 'overview': state['overview'],
                 'attempt': state['attempts'], 'execution_error': state.get('error'),
                 'result': ({'columns': state['table']['columns'],
                     'rows': [[v[:200] if isinstance(v, str) else v for v in row] for row in state['table']['rows'][:20]],
                     'diagnostics': json.dumps(state['table']['diagnostics'], ensure_ascii=False)[:12000],
                     'total_result_rows': len(state['table']['rows']), 'preview_only': True} if state.get('table') else None),
-                'instruction': '检查分析与用户意图是否一致。预览不代表全部结果；数字只能引用执行结果；错误或语义不清不可accept。仅修代码可repair，不得改变计划筛选、单位或计算口径；业务歧义必须clarify。'}, Review)
+                'instruction': '检查分析与用户意图是否一致。预览不代表全部结果；数字只能引用执行结果；错误或语义不清不可accept。仅修代码可repair，不得改变计划筛选、单位或计算口径；业务歧义必须clarify。'}
+            try:
+                decision = generate('csv_review', payload, Review)
+            except DocumentError as error:
+                if error.code not in ('task_budget_exhausted', 'run_budget_exhausted'):
+                    raise
+                return {'review_pending': True}
             if decision['decision'] == 'clarify' and not (decision['clarification'] or '').strip():
                 raise DocumentError('invalid_csv_review', 'CSV review omitted its clarification question.', 502)
             if decision['decision'] == 'repair':
@@ -307,6 +364,8 @@ class CsvSpecialist:
                 return {'review': decision, 'reviewed_attempt': state['attempts'], 'error': state['error']}
             return {'review': decision, 'reviewed_attempt': state['attempts']}
         def route_review(state):
+            if state.get('review_pending'):
+                return 'collect'
             return 'build_execute' if (state['plan']['action'] == 'compute'
                 and state['review']['decision'] == 'repair' and state['attempts'] < 2
                 and state['review']['script'].strip()) else 'collect'
@@ -336,12 +395,21 @@ class CsvSpecialist:
         plan, review = state['plan'], state.get('review', {})
         clarification = plan['clarification'] if plan['action'] == 'clarify' else review.get('clarification') if review.get('decision') == 'clarify' else None
         error = state.get('error')
-        status = 'clarification' if clarification else 'failed' if error else 'completed'
+        input_review_pending = any(_calculation_summary(a['calculation']).get('review_complete') is False
+                                   for a in state['reusable'])
+        review_pending = state.get('review_pending', False) or input_review_pending
+        status = 'clarification' if clarification else 'failed' if error else 'partial' if review_pending else 'completed'
         artifacts, descriptors, findings = [], [], []
         calculations = []
-        if status == 'completed':
+        if status in ('completed', 'partial'):
             table = state['table']
+            artifact_scope = task.scope.model_copy(update={'documents': tuple(dict.fromkeys(
+                (*task.scope.documents, *(ref for scope in task.scope.dependency_scopes for ref in scope.documents))))})
             calculation = {'plan': plan, 'review': review or None, 'scope': task.scope.model_dump(mode='json'),
+                'review_complete': not review_pending,
+                'product_mapping': state.get('product_mapping', []),
+                'product_identifiers': [p.model_dump(mode='json') for p in task.product_identifiers],
+                'dependency_evidence': [e.model_dump(mode='json') for e in task.dependency_evidence],
                 'execution_image': getattr(self.executor, 'expected_image', None),
                 'input_artifacts': [{'artifact_id': a['artifact_id'], 'version_id': a.get('version_id', '1'),
                     'payload_sha256': sha256(json.dumps(a['payload'], sort_keys=True,
@@ -365,14 +433,14 @@ class CsvSpecialist:
                 'provenance': calculation['inputs']}, 'calculation': encoded,
                 'unit': plan['unit'], 'cache_key': cache_key})
             descriptors.append(ArtifactDescriptor(artifact_id=identity, version_id='1', kind='table',
-                scope=task.scope, storage_ref=identity, calculation=encoded, unit=plan['unit']))
+                scope=artifact_scope, storage_ref=identity, calculation=encoded, unit=plan['unit']))
             if table['chart']:
                 chart_id = f'{task.task_id}:csv-chart'
                 artifacts.append({'artifact_id': chart_id, 'kind': 'chart',
                     'payload': {**table['chart'], 'table_artifact_id': identity},
                     'calculation': encoded, 'unit': plan['unit'], 'cache_key': cache_key})
                 descriptors.append(ArtifactDescriptor(artifact_id=chart_id, version_id='1', kind='chart',
-                    scope=task.scope, storage_ref=chart_id, calculation=encoded, unit=plan['unit']))
+                    scope=artifact_scope, storage_ref=chart_id, calculation=encoded, unit=plan['unit']))
             # This is a display preview only; the complete result remains in the artifact.
             def escape(value):
                 return ('' if value is None else str(value)).replace('|', '\\|').replace('\n', ' ')
@@ -384,7 +452,11 @@ class CsvSpecialist:
             findings.append(Finding(text='\n'.join(lines), artifact_ids=(identity,)))
             calculations.append({'calculation_id': identity, 'operation': {'tool': 'isolated_python'},
                                  'result': {'artifact_id': identity, 'row_count': len(table['rows'])}})
-        gaps = (clarification,) if clarification else ('CSV calculation could not produce a validated result.',) if error else ()
+        gaps = ((clarification,) if clarification else ('CSV calculation could not produce a validated result.',) if error
+            else ('The execution result passed structural validation, but the required semantic review did not finish within the model budget.',)
+            if state.get('review_pending') else ())
+        if input_review_pending:
+            gaps += ('An input result has an unfinished semantic review; filtering or charting it does not resolve that limitation.',)
         result = TaskResult(session_id=task.session_id, turn_id=task.turn_id, run_id=task.run_id,
             task_id=task.task_id, status=status, findings=tuple(findings), artifact_refs=tuple(descriptors),
             gaps=gaps, clarification=clarification,

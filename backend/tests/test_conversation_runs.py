@@ -92,7 +92,7 @@ def test_clarification_can_restart_and_resume_without_duplicate_publication(tmp_
     done = reopened.execute(accepted['run_id'])
     assert done['status'] == 'completed'
     assert model.calls[-1]['clarifications'] == ['I mean a greeting']
-    assert len(reopened.sessions.messages(sid)) == 2
+    assert len(reopened.sessions.messages(sid)) == 3
 
 
 def test_persistent_scope_only_command_uses_idempotent_rule_operation(tmp_path):
@@ -291,7 +291,7 @@ def test_followup_uses_focus_for_identity_and_fetches_fresh_evidence(tmp_path):
     assert specialist.tasks[-1].objective == 'Find A height'
     assert specialist.tasks[-1].scope.documents == (a,)
     assert model.calls[-1]['focus']['reference_id'] == 'A'
-    assert all(item['role'] == 'user' for item in model.calls[-1]['history'])
+    assert all(item['role'] == 'user' for item in model.calls[-1]['recent_messages'])
     assert 'Fresh fact' not in str(model.calls[-1])
 
 
