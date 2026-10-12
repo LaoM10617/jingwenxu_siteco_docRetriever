@@ -1,7 +1,7 @@
 export type Document = {
   document_id: string;
   original_filename: string;
-  status: "queued" | "processing" | "ready" | "failed";
+  status: "queued" | "processing" | "ready" | "failed" | "trashed";
   stage: string;
   error: { code: string; message: string; retryable: boolean } | null;
   warnings: { page_number?: number; record_number?: number; column?: string; code: string; message: string }[];

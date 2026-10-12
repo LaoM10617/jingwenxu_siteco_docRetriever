@@ -11,7 +11,7 @@ type Upload = {
   state: "waiting" | "uploading" | "received" | "error";
   message?: string;
 };
-type Tab = "materials" | "history" | "settings";
+type Tab = "materials" | "trash" | "history" | "settings";
 
 function Icon({ kind }: { kind: "panel" | "file" | "plus" | "arrow" }) {
   return (
@@ -47,6 +47,11 @@ function Icon({ kind }: { kind: "panel" | "file" | "plus" | "arrow" }) {
 export default function App() {
   const chat = useChat();
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [trash, setTrash] = useState<Document[]>([]);
+  const [trashError, setTrashError] = useState("");
+  const [trashLoaded, setTrashLoaded] = useState(false);
+  const [changing, setChanging] = useState(false);
+  const [fileActionError, setFileActionError] = useState("");
   const [listError, setListError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -111,6 +116,46 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    if (tab !== "trash") return;
+    const controller = new AbortController();
+    setTrashLoaded(false);
+    request<Document[]>("/trash", {signal: controller.signal})
+      .then(items => {
+        if (controller.signal.aborted) return;
+        setTrash(items);
+        setTrashError("");
+        setTrashLoaded(true);
+      })
+      .catch(error => {
+        if (!controller.signal.aborted) setTrashError(error.message);
+      });
+    return () => controller.abort();
+  }, [tab, refresh]);
+
+  async function changeFile(action: "trash" | "restore" | "empty", doc?: Document) {
+    if (changing) return;
+    if (action === "empty" && !window.confirm("Permanently delete all files in Trash and their search data? This cannot be undone. Existing chat messages will remain.")) return;
+    setChanging(true);
+    setFileActionError("");
+    try {
+      await request(action === "empty" ? "/trash" : `/documents/${encodeURIComponent(doc!.document_id)}/${action}`,
+        {method: action === "empty" ? "DELETE" : "POST"});
+      if (action === "trash") {
+        setSelected(ids => ids.filter(id => id !== doc!.document_id));
+        setDocuments(items => items.filter(item => item.document_id !== doc!.document_id));
+        if (preview === doc!.document_id) setPreview(null);
+      } else {
+        setTrash(items => action === "empty" ? [] : items.filter(item => item.document_id !== doc!.document_id));
+      }
+    } catch (error) {
+      setFileActionError(error instanceof Error ? error.message : "File action failed.");
+    } finally {
+      setChanging(false);
+      setRefresh(n => n + 1);
+    }
+  }
 
   useEffect(() => {
     try {
@@ -319,16 +364,17 @@ export default function App() {
         aria-label="Workspace"
       >
         <nav className="tabs" aria-label="Workspace sections">
-          {(["materials", "history", "settings"] as const).map((value) => (
+          {(["materials", "trash", "history", "settings"] as const).map((value) => (
             <button
               key={value}
               aria-current={tab === value ? "page" : undefined}
               onClick={() => setTab(value)}
             >
-              {{materials: 'Materials', history: 'Session info', settings: 'Settings'}[value]}
+              {{materials: 'Materials', trash: 'Trash', history: 'Session info', settings: 'Settings'}[value]}
             </button>
           ))}
         </nav>
+        {fileActionError && <p role="alert" className="error">{fileActionError}</p>}
         {tab === "materials" && (
           <>
             <div className="section-heading">
@@ -455,6 +501,11 @@ export default function App() {
                     View evidence
                   </button>
                 )}
+                <button
+                  disabled={changing || !!listError || doc.status === "queued" || doc.status === "processing"}
+                  title={doc.status === "queued" || doc.status === "processing" ? "Available after processing finishes" : undefined}
+                  onClick={() => void changeFile("trash", doc)}
+                >Move to Trash</button>
               </article>
             ))}
             {uploads.length > 0 && (
@@ -499,6 +550,27 @@ export default function App() {
               is restored in this tab and checked for availability.
             </p>
           </>
+        )}
+        {tab === "trash" && (
+          <section>
+            <div className="section-heading">
+              <h2>Trash</h2>
+              <button disabled={changing || !trashLoaded || !!trashError || trash.length === 0}
+                onClick={() => void changeFile("empty")}>Empty Trash</button>
+            </div>
+            <p className="muted">Restore files to use them again. Emptying Trash permanently deletes the files and their search data.</p>
+            <button onClick={() => setRefresh(n => n + 1)}>Refresh Trash</button>
+            {trashError && <p role="alert" className="error">{trashError}</p>}
+            {!trashLoaded && !trashError && <p role="status">Loading Trash…</p>}
+            {trashLoaded && !trashError && trash.length === 0 && <p>Trash is empty.</p>}
+            {trash.map(doc => (
+              <article className="document" key={doc.document_id}>
+                <p className="document-name">{doc.original_filename}</p>
+                <button disabled={changing || !trashLoaded || !!trashError}
+                  onClick={() => void changeFile("restore", doc)}>Restore</button>
+              </article>
+            ))}
+          </section>
         )}
         {tab === "history" && (
           <section>

@@ -86,6 +86,26 @@ def list_documents(request: Request):
     return [public_document(doc) for doc in request.app.state.documents.list()]
 
 
+@router.get('/api/trash')
+def list_trash(request: Request):
+    return [public_document(doc) for doc in request.app.state.documents.list(trashed=True)]
+
+
+@router.delete('/api/trash')
+def empty_trash(request: Request):
+    return request.app.state.documents.empty_trash()
+
+
+@router.post('/api/documents/{document_id}/trash')
+def trash_document(document_id: str, request: Request):
+    return public_document(request.app.state.documents.trash(document_id))
+
+
+@router.post('/api/documents/{document_id}/restore')
+def restore_document(document_id: str, request: Request):
+    return public_document(request.app.state.documents.restore(document_id))
+
+
 @router.get('/api/documents/{document_id}')
 def document_status(document_id: str, request: Request):
     document = request.app.state.documents.get(document_id)
