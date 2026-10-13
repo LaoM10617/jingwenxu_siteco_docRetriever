@@ -1,6 +1,6 @@
 # SITECO Document Chat
 
-Current architecture and stage evidence: [plan.md](plan.md), [stage-d-log.md](stage-d-log.md).
+Current architecture and stage evidence: [plan.md](plan.md), [stage-d-log.md](stage-d-log.md), with seperate agents for pdf analysis, csv analysis and conversation control.
 The original demo and historical evaluation notes below predate the session/run API.
 For CSV analysis, build and configure the separate trusted host worker as described in
 [runner/README.md](runner/README.md).
