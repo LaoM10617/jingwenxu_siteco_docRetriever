@@ -1,10 +1,5 @@
 # SITECO Document Chat
 
-Current architecture and stage evidence: [plan.md](plan.md), [stage-d-log.md](stage-d-log.md), with seperate agents for pdf analysis, csv analysis and conversation control.
-The original demo and historical evaluation notes below predate the session/run API.
-For CSV analysis, build and configure the separate trusted host worker as described in
-[runner/README.md](runner/README.md).
-
 ## 1. Demo
 
 Upload documents, ask questions, and inspect the sources behind each answer.
@@ -16,140 +11,280 @@ All evaluation data comes from https://www.siteco.de/metanavigation/downloads
 
 [Watch the demo (MP4)](siteco_demo.mp4). The video is stored with Git LFS; to download it after cloning, install Git LFS and run `git lfs pull`. Sample PDF and CSV documents used in testing are included in [test_data/](test_data/); upload them through the application to try it yourself.
 
-## 2. Repository structure
+The video shows the original demo. The current backend uses persistent sessions,
+a LangGraph conversation agent, PDF/CSV specialist graphs and isolated Python
+computation. The existing UI supports chat, citations, tables, charts and recovery;
+the visual redesign and independent developer interface are future work.
 
-Main folders and selected entry points:
+**Current status:** stages A–F have completed their recorded validation. Stage G
+background exploration is implemented in the working tree but has not completed
+full integration or real-provider acceptance. Building this checkout includes
+those G changes. See [plan.md](plan.md), [stage-f-log.md](stage-f-log.md) and
+[stage-g-log.md](stage-g-log.md) for evidence and limitations.
 
-```text
-.
-|-- backend/
-|   |-- app/
-|   |   |-- main.py                    FastAPI entry point and HTTP routes
-|   |   |-- uploads.py, documents.py   Upload handling and document lifecycle
-|   |   |-- processing.py             Ingestion jobs and index publication
-|   |   |-- parsing.py, pdf_layout.py  PDF text extraction and chunking
-|   |   |-- csv_parsing.py             CSV record parsing
-|   |   |-- pdf_store.py, csv_store.py Document indexes and record storage
-|   |   |-- retrieval/                PDF search, lexical ranking and RRF fusion
-|   |   |-- embeddings.py, voyage.py  Embedding provider integration
-|   |   |-- reranking.py              Optional result reranking
-|   |   |-- questions.py, answers.py  Question routing and grounded answers
-|   |   |-- conversation_runs.py      Durable graph orchestration
-|   |   |-- sessions.py, generation.py Persisted context and model calls
-|   |   |-- previews.py              Source preview data
-|   |   |-- config.py, runtime_*.py   Configuration and runtime service wiring
-|   |   `-- services/                Request tracing and summary statistics
-|   |-- tests/                       Backend unit and integration tests
-|   |-- requirements*.txt            Python dependencies and lock files
-|   `-- Dockerfile
-|-- frontend/
-|   |-- src/
-|   |   |-- App.tsx, ChatThread.tsx    Workspace and chat interface
-|   |   |-- EvidencePanel.tsx         Retrieved evidence display
-|   |   |-- SourcePreview.tsx         PDF highlights and CSV record previews
-|   |   |-- SettingsPanel.tsx         Model and retrieval settings
-|   |   |-- api.ts, useChat.ts        API client and chat state
-|   |   `-- style.css                Interface styling
-|   |-- tests/                       Playwright browser and integration tests
-|   |-- package.json                 Frontend dependencies and commands
-|   |-- vite.config.ts, nginx.conf   Development and Docker proxy settings
-|   `-- Dockerfile
-|-- eval/
-|   |-- cases/                       Evaluation questions and protocol data
-|   |-- results/
-|   |   `-- m50/
-|   |       `-- run-20260927-ab-01/   Published protocol, traces, scores and reports
-|   |-- run_m50.py                   Evaluation runner
-|   |-- summarize_m50.py             Offline scoring and report generation
-|   |-- material_manifest.json       Evaluation document inventory
-|   `-- README.md                    Evaluation and reproduction instructions
-|-- assets/                          README screenshots
-|-- scripts/                         Tokenizer preparation utility
-|-- tests/                           Request tracing tests
-|-- test_data/                       Sample PDF and CSV documents for manual testing
-|-- siteco_demo.mp4                  Recorded application demo
-|-- compose.yaml                     Docker services and persistent storage
-|-- .env.example                     Environment variables and API key template
-|-- pytest.ini                       Python test configuration
-`-- README.md
+## 2. Architecture
+
+```mermaid
+flowchart TD
+    UI[React / TypeScript UI] --> API[FastAPI session and run API]
+    API --> Main[LangGraph conversation agent]
+    Main --> PDF[PDF specialist graph]
+    Main --> CSV[CSV specialist graph]
+    PDF --> Search[Hybrid retrieval and coverage reading]
+    CSV --> Jobs[Persistent execution jobs]
+    Explore[Bounded background CSV exploration] --> CSV
+    Main --> Business[(Business SQLite)]
+    Main --> Checkpoints[(LangGraph checkpoint SQLite)]
+    Jobs --> Business
+    Worker[Trusted host worker] -->|Authenticated claim / heartbeat / result| Jobs
+    Worker -->|Docker CLI| Sandbox[Disposable isolated pandas container]
+    Sandbox -->|Bounded result JSON| Worker
 ```
+
+- **Conversation agent:** resolves intent and references, enforces session source
+  scope, coordinates PDF/CSV tasks and publishes answers/artifacts. It owns
+  conversational context; specialists do not maintain separate chat histories.
+- **PDF specialist:** factual retrieval, coverage reading and topic comparison.
+  Hybrid search combines lexical and Voyage vector retrieval with optional
+  reranking. Top K hits are not full-document coverage; gaps remain explicit.
+  Citations retain document versions and source locations.
+- **CSV specialist:** plans filtering, sorting, aggregation and joins, generates
+  Python for isolated execution, validates results and performs bounded review
+  when needed. Numbers come from computation, not model arithmetic. Original
+  strings and row identities preserve identifiers such as leading zeros.
+- **Execution boundary:** a trusted host worker pulls authenticated backend jobs
+  and starts pinned pandas containers. Containers have no network, application
+  keys or Docker socket and have bounded resources. Neither the backend nor
+  generated scripts receive Docker control; only the host worker does.
+- **Persistence:** `app.sqlite3` owns documents, sessions, rules, tasks, artifacts
+  and receipts; `conversation-checkpoints.sqlite3` stores graph checkpoints.
+  Originals and tokenizer assets live beside the databases. The worker has its
+  own instance/receipt store and never accesses the backend database directly.
+- **Recovery:** session history has no 24-hour expiry. The browser stores only the
+  current session pointer and UI state. Interrupted conversation runs require
+  explicit resume; durable receipts and stable identities prevent duplicate
+  publication. Foreground model calls are capped at six per interaction round.
+- **Background exploration (G):** deterministic CSV overview, at most three
+  candidates and one precomputation per session/document version. Its lifetime
+  budget is three model calls and two isolated executions, unchanged by restart
+  or resume. It yields to foreground requests and can be disabled/stopped through
+  the API. Results stay outside chat/context until selected. No exploration UI
+  has been added yet.
+
+This is a single-user local application with one backend process. Session
+boundaries are not multi-user authentication. Architecture decisions:
+[decisions-design.md](decisions-design.md). API contracts and examples:
+[ui-developer-handoff.md](ui-developer-handoff.md).
 
 ## 3. Run the application
 
-Run commands from the repository root. Copy `.env.example` to `.env` and configure:
+Run commands from the repository root. Examples use Windows PowerShell; Linux
+uses `.venv/bin/python` and equivalent environment setup.
 
-- `GEMINI_API_KEY`: required for the default Gemini model.
-- `VOYAGE_API_KEY`: required for PDF embedding and retrieval.
-- `GROQ_API_KEY`: required only when choosing Groq.
-- `GENERATION_PROVIDER`: `gemini` (default) or `groq`.
-- `GEMINI_GENERATION_MODEL` / `GROQ_GENERATION_MODEL`: model selection.
-- `DATA_DIR`: local runtime directory; default `data/runtime`.
-- `HOST_DATA_DIR`: Docker runtime directory; default `./data/runtime`.
-- `HOST_PORT` / `FRONTEND_PORT`: Docker ports; defaults `8000` / `8080`.
+### Prerequisites and configuration
 
-Additional settings and defaults are in `.env.example`. Keep API keys local.
+- Docker with Linux containers; the pandas runner is validated on Linux/amd64.
+- Host Python 3.12 for the worker, including when the UI/backend run in Docker.
+- Node.js 24 only when running/building the frontend outside Docker.
+- Your own generation and embedding credentials.
 
-### Local startup
-
-Requires Python 3.12 and Node.js 24. PowerShell:
+Create `.env` from [.env.example](.env.example) if it does not already exist:
 
 ```powershell
-py -3.12 -m venv backend/.venv
-backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.lock.txt
-backend/.venv/Scripts/python.exe scripts/prepare_voyage_tokenizer.py data/runtime/tokenizers
-backend/.venv/Scripts/python.exe -m uvicorn app.main:create_app --factory --app-dir backend --host 127.0.0.1 --port 8000
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+py -3.12 -m venv .venv
+.venv/Scripts/python.exe -m pip install -r backend/requirements.lock.txt
 ```
 
-In a second terminal:
+Edit `.env` locally. Environment variables override its values.
+
+| Setting | Purpose |
+| --- | --- |
+| `GEMINI_API_KEY` | Default generation provider credential |
+| `GROQ_API_KEY` | Required if selecting Groq instead |
+| `VOYAGE_API_KEY` | PDF embeddings and optional reranking |
+| `GENERATION_PROVIDER` | `gemini` (default) or `groq` |
+| `GEMINI_GENERATION_MODEL`, `GROQ_GENERATION_MODEL` | Generation model selection |
+| `EXECUTION_IMAGE` | Complete immutable `sha256:...` identity of the built runner |
+| `EXECUTION_WORKER_TOKEN` | Strong random secret shared by backend and host worker |
+| `DATA_DIR` | Local Python runtime path; default `data/runtime` |
+| `HOST_DATA_DIR` | Docker host runtime path; default `./data/runtime` |
+| `HOST_PORT`, `FRONTEND_PORT` | Published backend/frontend ports; defaults `8000` / `8080` |
+| `COMPOSE_PROJECT_NAME` | Docker instance name; default `document-chat` |
+
+Keep credentials out of frontend variables, source control and shared logs. Use
+`docker compose config --quiet` for validation; ordinary `config` output can
+expand secrets. Missing credentials permit startup but do not enable provider
+calls. The worker reads its token from its environment, **not from `.env`**.
+
+### Build the CSV runner (both startup options)
+
+```powershell
+docker build -t siteco-csv-runner:local -f runner/Dockerfile .
+docker image inspect --format '{{.Id}}' siteco-csv-runner:local
+```
+
+Set `.env`'s `EXECUTION_IMAGE` to the full printed ID and configure
+`EXECUTION_WORKER_TOKEN`. Use the same image ID and token for the worker.
+Rebuild the runner after changes to its lock file or `backend/app/csv_runtime.py`.
+Pandas is installed inside the runner, not in the backend or host environment.
+
+### Option A: Docker frontend and backend
+
+Create the directory specified by `HOST_DATA_DIR` first; Compose rejects missing
+bind directories. For the default path:
+
+```powershell
+New-Item -ItemType Directory -Force data/runtime | Out-Null
+docker compose config --quiet
+docker compose build
+docker compose run --rm --no-deps backend python -m app.prepare_tokenizer /app/runtime/tokenizers
+docker compose up -d --wait --wait-timeout 60
+```
+
+On Linux, the runtime directory must be writable by container UID/GID
+`10001:10001`. Tokenizer preparation requires network access on first setup.
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080), then start the host worker below.
+**Compose manages only the frontend/backend containers, not the host worker.**
+
+### Start the host worker
+
+In a separate terminal at the repository root, enter the **same token** configured
+in backend `.env`, without placing it in command history:
+
+```powershell
+$workerSecret = Read-Host 'Backend EXECUTION_WORKER_TOKEN' -AsSecureString
+$env:EXECUTION_WORKER_TOKEN = [System.Net.NetworkCredential]::new('', $workerSecret).Password
+.venv/Scripts/python.exe scripts/run_python_worker.py --backend http://127.0.0.1:8000 --work-dir data/python-worker --image sha256:YOUR_IMAGE_ID
+```
+
+Replace `sha256:YOUR_IMAGE_ID` with the complete ID above, and change the port if
+`HOST_PORT` differs. Keep this terminal running. Stop the worker with Ctrl+C;
+stop the Docker application with `docker compose stop`.
+
+Use a persistent, instance-specific worker directory. Without a worker, uploads
+and PDF questions can work, but new CSV computations cannot complete. Execution
+limits and recovery details: [runner/README.md](runner/README.md).
+
+### Option B: Local backend and frontend
+
+Use the same `.env`, Python environment and runner setup. Docker is still required
+for CSV execution, even though the web application runs locally.
+
+Backend terminal, using the default `DATA_DIR`:
+
+```powershell
+.venv/Scripts/python.exe scripts/prepare_voyage_tokenizer.py data/runtime/tokenizers
+.venv/Scripts/python.exe -m uvicorn app.main:create_app --factory --app-dir backend --host 127.0.0.1 --port 8000
+```
+
+Frontend terminal:
 
 ```powershell
 npm ci --prefix frontend
 npm run dev --prefix frontend
 ```
 
-Open **http://127.0.0.1:5173**. If you change `DATA_DIR`, use its `tokenizers`
-subdirectory in the preparation command.
+Start the host worker in a third terminal as above, then open
+[http://127.0.0.1:5173](http://127.0.0.1:5173). The Vite proxy targets backend port
+8000. Do not run local and Docker backends on the same port or runtime directory
+simultaneously. If `DATA_DIR` changes, prepare its `tokenizers` subdirectory.
 
-### Docker startup
+### Updating an existing Docker instance
 
-Requires Docker with Linux containers:
+Application source is copied into images. `docker compose restart` does **not**
+load updated source. After checking the target instance/configuration and backing
+up its data, rebuild and recreate the services:
 
-```sh
-docker compose build
-docker compose run --rm --no-deps backend python -m app.prepare_tokenizer /app/runtime/tokenizers
-docker compose up -d --wait --wait-timeout 60
+```powershell
+docker compose up -d --build --wait --wait-timeout 60
 ```
 
-Open **http://127.0.0.1:8080**. Stop with `docker compose down`.
+Restart the host worker when its code/configuration changes. If a runner rebuild
+changes its image ID, update both backend configuration and the worker command.
+Saved runs retain their original behavior configuration and may require it to resume.
 
-### Database path mismatches in environment configuration
+For a separate demo instance, use different project names, ports, runtime
+and worker directories, and tokens. Backup, migration and permission details:
+[deployment.md](deployment.md). A healthy container proves service availability,
+not end-to-end model or calculation correctness.
 
-The implementation persists documents, indexes and question/answer results in the database.
+## 4. Features, manual testing and current limits
 
-1. The frontend stores the current conversation reference in `sessionStorage`.
-2. Conversations expire after 24 hours.
-3. Restarting the backend interrupts unfinished questions but does not intentionally clear completed question/answer records.
+The existing UI supports:
 
-During manual testing from a fresh clone, history was reported missing after restarting the application. Differences in the database paths configured through `DATA_DIR` and `HOST_DATA_DIR` may be involved; the cause has not yet been confirmed.
+- PDF/CSV upload, processing states, citations and source previews.
+- Persistent session chat, natural-language source restrictions and purpose rules.
+- PDF questions, coverage summaries and cross-document analysis with explicit gaps.
+- CSV filtering, sorting, aggregation, joins, result tables and basic charts.
+- PDF-derived product identifiers driving exact CSV matching and calculations.
+- Follow-up filtering/chart reuse, clarification, stop and explicit resume.
+- Gemini/Groq settings, Top K and optional Voyage reranking.
 
-**Voyage tokenizer path mismatch.** If you see “Voyage-4 requires the pinned tokenizer in DATA_DIR/tokenizers,” check the runtime path configured in `.env` and the tokenizer's actual location. The tokenizer must be at `<DATA_DIR>/tokenizers/voyage-4-tokenizer.json`. During one local setup, the author downloaded it under `data/local-e2e/tokenizers/` while `DATA_DIR` still pointed to `data/runtime`. Align these paths and restart the backend. For Docker, prepare the tokenizer in the runtime directory mounted from `HOST_DATA_DIR`.
+For a manual smoke test, upload a sample PDF, ask a factual question and open its
+citation. Upload a CSV and request a row count or calculation with explicit numeric
+format, units and missing-value handling. Check the numbers against the source,
+ask a follow-up, and try stop/resume. Restart the backend and check that the same
+session remains available. The API health endpoint is `/api/health`.
+
+Background exploration controls/results and developer observations are API-only:
+`/api/sessions/{sid}/explorations` and
+`/api/developer/sessions/{sid}/explorations/{id}`. Exploration is enabled by default
+for new imports and may make bounded model calls. Disable it per session with
+`PUT /api/sessions/{sid}/explorations/settings` and `{"enabled":false}`. Existing
+materials on startup receive an overview without automatic paid continuation.
+See [API examples](ui-developer-handoff.md).
+
+Current boundaries:
+
+- Native-text PDFs only; no OCR. Coverage and semantic checks can return partial
+  results; source coordinates are not uniformly fine-grained.
+- Upload limit 20 MiB, up to 10 active files, PDFs up to 50 pages, CSVs up to 20,000
+  rows. CSV supports UTF-8 and BOM-marked UTF-16 with comma/semicolon/tab separators;
+  arbitrary encoding selection is not implemented.
+- Result tables are bounded to 20,000 rows, 100 columns and 16 MiB. Charts are
+  basic bar/line/scatter previews; large-file export is not implemented.
+- Model planning, summaries and review do not prove arbitrary semantic correctness.
+  Ambiguous joins/fields/formats require clarification. No silent provider fallback.
+- G exploration's final integration/real-provider acceptance is pending. UI redesign
+  and a dedicated developer mode are not implemented.
+
+**Tokenizer troubleshooting:** `voyage-4-tokenizer.json` must be under the active
+`DATA_DIR/tokenizers`. Local `DATA_DIR` and Docker `HOST_DATA_DIR` identify different
+startup paths; prepare the tokenizer in the directory actually used by that mode.
+For Docker, the mounted directory appears as `/app/runtime` inside the container.
 
 ![Voyage tokenizer error caused by a runtime path mismatch](assets/voyage-tokenizer-path-error.png)
 
-## 4. Implemented features
+## 5. Validation and historical evaluation
 
-- PDF/CSV upload with processing status.
-- Text-PDF hybrid retrieval and exact order lookup in SITECO price-list CSVs.
-- Questions across selected documents and follow-up conversation memory.
-- Source citations, original PDF page highlighting and CSV record previews.
-- Gemini/Groq configuration, adjustable Top K and optional Voyage reranking.
+The last completed A–F full regression, recorded on 2026-10-12, passed on Windows
+and Linux with **554 passed, 15 skipped and 10 subtests passed** on each platform;
+the frontend build and 10 browser tests also passed. F real-provider validation
+covered Gemini/Voyage, PDF-to-CSV coordination and isolated pandas through a
+cross-fix resumed session. Historical partial answers remain partial; this was
+not a clean final-code run from an empty database. These results do not certify
+the current G working tree. See [F evidence](stage-f-log.md) and [G progress](stage-g-log.md).
 
-Current limitations:
+Run backend tests after installing the development lock file:
 
-- Cross-document comparison and retrieval have not been optimized; searching across multiple documents may introduce additional noise.
-- CSVs currently support only exact order-number lookups. Semantic queries and queries about information absent from the CSV may lead to a loss of conversational context.
+```powershell
+.venv/Scripts/python.exe -m pip install -r backend/requirements-dev.lock.txt
+.venv/Scripts/python.exe -m pytest -q
+docker build --target test -t siteco-tests -f backend/Dockerfile .
+npm ci --prefix frontend
+npm run build --prefix frontend
+```
 
-## 5. Evaluation
+Docker executor tests are opt-in; commands are in [runner/README.md](runner/README.md).
+Real-provider probes under `scripts/probe_stage_*.py` can incur API charges and
+write independent receipts under `data/`. Ordinary tests do not replace those checks.
+
+### Original demo evaluation (historical)
+
+These scores belong to the original architecture and recorded evaluation commit.
+They have not been rerun as an evaluation of the current LangGraph system.
+
 
 First evaluation: 12 conversation turns and 7 PDF retrieval queries.
 
@@ -172,138 +307,28 @@ For a live evaluation, use the recorded evaluation commit, matching source
 materials and your own Gemini/Voyage keys. Commands and configuration:
 [Evaluation README](eval/README.md).
 
-## 6. Technical choices and rationale
+## 6. Repository guide
 
-1. **Scope driven by real documents.** We inspected SITECO materials and focused
-   on finding clauses, comparing product specifications, and looking up order prices.
-   For image-heavy brochure PDFs, we implemented skipping of image-only pages and
-   pages that fail parsing, returning limited retrieval results with explicit
-   coverage warnings when information is incomplete. Building on this handling,
-   we further optimized the text-PDF retrieval baseline and added simple csv retrieval
-   within the two-day scope.
+| Path | Responsibility |
+| --- | --- |
+| `backend/app/main.py`, `*_api.py` | Application wiring and HTTP interfaces |
+| `backend/app/conversation_runs.py`, `conversation_context.py` | Main graph, durable runs, bounded context and summaries |
+| `backend/app/agent_protocol.py`, `sessions.py`, `artifacts.py` | Typed task/result contracts, source scope and persistent artifacts |
+| `backend/app/pdf_specialist.py`, `pdf_analysis.py`, `pdf_reading.py` | PDF specialist paths and coverage reading |
+| `backend/app/csv_specialist.py`, `csv_exploration.py` | CSV graph and bounded background exploration |
+| `backend/app/execution_jobs.py`, `host_worker.py`, `python_executor.py` | Durable pull jobs, trusted host control and isolation |
+| `backend/app/csv_runtime.py`, `runner/` | Container-side pandas helpers, image and locked dependencies |
+| `backend/app/documents.py`, `processing.py`, `*_parsing.py`, `*_store.py` | Document lifecycle, ingestion and structured storage |
+| `backend/app/retrieval/`, `embeddings.py`, `voyage.py`, `reranking.py` | Retrieval, embedding admission and optional reranking |
+| `backend/app/generation.py`, `config.py`, `runtime_*.py` | Model adapters and configuration |
+| `frontend/src/` | React chat, settings, result and source previews |
+| `backend/tests/`, `frontend/tests/`, `tests/` | Backend, browser and tracing tests |
+| `scripts/` | Host worker launcher, tokenizer preparation and stage probes |
+| `test_data/`, `assets/`, `siteco_demo.mp4` | Sample documents, screenshots and original demo |
+| `eval/` | Historical evaluation protocols, results and scoring scripts |
+| `compose.yaml`, `.env.example` | Deployment and configuration template |
 
-2. **FastAPI, React and Docker Compose.** FastAPI provides typed API validation
-   alongside Python's document-processing ecosystem, while React/TypeScript
-   supports the upload, conversation and source-viewing interactions. Familiarity
-   with this stack reduced implementation risk; two containers retain independent
-   frontend/backend builds with a single Compose startup command.
-
-3. **Layout-aware parsing and chunking.** pdfplumber supplies text and coordinates,
-   which we group within each page while retaining headings, table headers and
-   source locations. Chunks follow complete clauses or table rows, targeting
-   roughly 2,400 characters with a 6,000-character ceiling, to keep product
-   ownership and qualifying conditions together.
-
-4. **Different retrieval paths for text and records.** PDF retrieval combines
-   SQLite FTS5/BM25 and Voyage vectors through RRF, covering literal identifiers
-   and semantic matches without calibrating their raw scores. Price-list CSVs use
-   exact order lookup to avoid substituting similar products; SQLite and per-document
-   FAISS exact indexes keep storage local and document selection explicit.
-
-5. **Hosted models with runtime configuration.** Gemini is the default generation
-   path, Groq is a configurable alternative, and Voyage provides embeddings,
-   avoiding local model downloads and GPU requirements. Settings accepts the user's
-   own keys and inference/retrieval options, with backend calls bound to the
-   configuration accepted for each task. The embedding model remains fixed to
-   preserve index compatibility.
-
-6. **A chat interface centered on evidence.** The conversation occupies the main
-   workspace, with materials and settings in a collapsible sidebar. Expandable
-   citations, PDF page highlights and CSV record previews make checking an answer
-   part of the normal interaction.
-
-7. **Bounded tasks and focused conversation memory.** Background processing and
-   status polling accommodate ingestion and model latency without adding an
-   external queue service; documents become queryable after complete index
-   publication. Follow-ups use limited history to resolve subjects, then retrieve
-   fresh evidence from the selected documents, while supported calculations use
-   deterministic tools.
-
-8. **Optional reranking guided by evaluation.** We tested reranking on the same
-   candidate sets before exposing it as an optional setting. In the formal small
-   evaluation, it increased required-evidence coverage from 10/12 to 11/12 without
-   increasing the number of fully covered questions. It remains off by default
-   so its coverage benefit can be weighed against another provider call and latency.
-
-## 7. Diagnosed issues and next improvements
-
-### Retrieval coverage
-
-Some prose-PDF evidence is lost during final ranking.
-
-**Possibly involved:** [retrieval/pdf.py](backend/app/retrieval/pdf.py),
-[fusion.py](backend/app/retrieval/fusion.py), and
-[reranking.py](backend/app/reranking.py).
-
-**Diagnosis:** The necessary evidence is present in the vector results but is not
-fully reflected in the final output of the default RRF; therefore, we should first
-examine candidate fusion, Top-K, and passage coverage.
-
-### Answer completeness and attribution
-
-Answers can omit conditions or misattribute evidence.
-
-**Possibly involved:** `ANSWER` prompting, evidence organization, and output
-verification in [answers.py](backend/app/answers.py).
-
-**Diagnosis:** E01 stems from an incomplete response regarding the qualifying
-conditions present in the evidence; E02 additionally involves an error in
-attribute attribution. Since the existing prompt already requires the retention
-of qualifiers and attribution, simply adding a phrase like "please answer
-accurately" may not be effective. Potential approaches include providing
-object-by-object responses, ensuring coverage of conditions and exceptions, and
-avoiding the mistake of equating "not retrieved" with "not present in the document."
-
-### Provider failures
-
-Provider failures can block follow-up turns.
-
-**Possibly involved:** [generation.py](backend/app/generation.py), `QuestionBudget`
-in [questions.py](backend/app/questions.py), and
-the retired `question_tasks.py` worker (now replaced by [conversation_runs.py](backend/app/conversation_runs.py)).
-
-**Diagnosis:** Two failed attempts lasting approximately 60 seconds confirm only
-that the call did not succeed; it is not yet possible to determine whether the
-cause lies with the network, the SDK, the server, or elsewhere. The first step is
-to add robust exception categorization and diagnostic checks for each stage.
-
-### Fixed issue
-
-- **Order-ID punctuation:** Sentence-final periods previously blocked valid order
-  IDs. Fixed.
-
-### Runtime and storage improvements
-
-- **Runtime wiring:** Unused imports, legacy test-oriented processing branches and
-  redundant startup adapters remain. Simplify service construction and refresh comments.
-- **Startup cleanup:** Partial startup failure can leave the ingestion worker
-  running. Ensure cleanup also covers failures during service initialization.
-- **Retry consistency:** Ingestion retries have a processor-cleanup race and
-  database/queue failure windows. Make retry scheduling consistent and recover
-  stranded jobs.
-- **Storage retention:** Failed uploads remain on disk without a retention limit.
-  Add deletion/expiry and a total storage quota.
-
-### Next optimization priorities
-
-1. **Persistence and recovery.** Make the resolved runtime directory visible and
-   verify document, index and conversation recovery across restarts. Add durable
-   conversation/file history and soft deletion with restoration, keeping database
-   records, source files and indexes consistent.
-2. **UI readability.** Replace long text-heavy interactions with concise answer
-   summaries, comparison views and expandable evidence. Make processing states,
-   missing information and recovery actions easy to distinguish.
-3. **Cross-document comparison.** Retrieve evidence separately for each requested
-   product/document, then align comparable attributes and units before synthesis.
-   Track coverage on both sides and explicitly mark missing values.
-4. **CSV semantic retrieval.** Add schema-aware matching for descriptive fields
-   alongside exact order-number lookup, retaining row-level citations. Ask for
-   clarification when matches are ambiguous and distinguish absent fields from
-   unmatched records.
-5. **Retrieval fusion and ranking.** Evaluate candidate depth, RRF weighting,
-   deduplication and reranking on fixed evidence-labeled queries. Measure evidence
-   recall and complete-question coverage alongside latency and API cost.
-6. **Answer prompting and verification.** Structure evidence by product and check
-   each claim for source support, attribute ownership, qualifiers and exceptions.
-   Extend verification beyond valid citation IDs, and measure unsupported claims
-   and required-fact coverage on the existing evaluation cases.
+Architecture decisions: [decisions-design.md](decisions-design.md). Execution plan
+and stage evidence: [plan.md](plan.md). Deployment and data migration:
+[deployment.md](deployment.md). Next UI/developer implementation entry points:
+[ui-developer-handoff.md](ui-developer-handoff.md).
