@@ -2,9 +2,8 @@
 
 Current architecture and stage evidence: [plan.md](plan.md), [stage-d-log.md](stage-d-log.md).
 The original demo and historical evaluation notes below predate the session/run API.
-The legacy `/api/questions` worker has been retired; current chat uses `/api/sessions/{id}/runs`.
 For CSV analysis, build and configure the separate trusted host worker as described in
-[runner/README.md](runner/README.md). Backend and analysis containers never mount the Docker socket.
+[runner/README.md](runner/README.md).
 
 ## 1. Demo
 
