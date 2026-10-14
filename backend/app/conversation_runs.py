@@ -255,6 +255,8 @@ class ConversationRuns:
                     receipt_key TEXT NOT NULL, response TEXT NOT NULL, task_id TEXT,
                     PRIMARY KEY(run_id,receipt_key));
             ''')
+            if 'kind' not in {row['name'] for row in db.execute('PRAGMA table_info(conversation_runs)')}:
+                db.execute("ALTER TABLE conversation_runs ADD COLUMN kind TEXT NOT NULL DEFAULT 'foreground'")
             if 'model_budget_start' not in {row['name'] for row in db.execute('PRAGMA table_info(conversation_runs)')}:
                 db.execute('ALTER TABLE conversation_runs ADD COLUMN model_budget_start INTEGER NOT NULL DEFAULT 0')
             if 'failed_receipt_key' not in {row['name'] for row in db.execute('PRAGMA table_info(conversation_runs)')}:
@@ -276,7 +278,7 @@ class ConversationRuns:
     def _row(self, run_id, session_id=None):
         with self._db() as db:
             row = db.execute('SELECT * FROM conversation_runs WHERE run_id=?', (run_id,)).fetchone()
-        if row is None or session_id is not None and row['session_id'] != session_id:
+        if row is None or row['kind'] != 'foreground' or session_id is not None and row['session_id'] != session_id:
             raise DocumentError('run_not_found', 'Run not found.', 404)
         return row
 
@@ -360,7 +362,7 @@ class ConversationRuns:
     def list(self, session_id):
         self.sessions.get(session_id)
         with self._db() as db:
-            ids = [row[0] for row in db.execute('SELECT run_id FROM conversation_runs WHERE session_id=? ORDER BY rowid', (session_id,))]
+            ids = [row[0] for row in db.execute("SELECT run_id FROM conversation_runs WHERE session_id=? AND kind='foreground' ORDER BY rowid", (session_id,))]
         return [self.inspect(session_id, run_id) for run_id in ids]
 
     def pdf_results(self, session_id, explicit_sources=None):
@@ -424,7 +426,7 @@ class ConversationRuns:
                     raise DocumentError('session_not_found', 'Session not found.', 404)
                 if session['data_version'] != expected_data_version or session['rule_version'] != expected_rule_version:
                     raise DocumentError('session_version_conflict', 'Session changed; refresh before retrying.', 409)
-                if db.execute("SELECT 1 FROM conversation_runs WHERE session_id=? AND status IN ('queued','running','waiting')", (session_id,)).fetchone():
+                if db.execute("SELECT 1 FROM conversation_runs WHERE session_id=? AND kind='foreground' AND status IN ('queued','running','waiting')", (session_id,)).fetchone():
                     raise DocumentError('session_busy', 'Complete or stop the active run first.', 409)
                 self.sessions.validate_sources(db, session_id, explicit_sources or ())
                 run_id = uuid4().hex
@@ -439,6 +441,8 @@ class ConversationRuns:
         if created:
             self._bound[run_id] = service
             self._accepted.add(run_id)
+            if hasattr(self, 'exploration'):
+                self.exploration.preempt()
         return self.inspect(session_id, run_id)
 
     def shutdown(self):
@@ -465,7 +469,7 @@ class ConversationRuns:
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT * FROM conversation_runs WHERE run_id=?', (run_id,)).fetchone()
-            if db.execute("SELECT 1 FROM conversation_runs WHERE session_id=? AND run_id<>? AND status IN ('queued','running','waiting')",
+            if db.execute("SELECT 1 FROM conversation_runs WHERE session_id=? AND run_id<>? AND kind='foreground' AND status IN ('queued','running','waiting')",
                           (session_id, run_id)).fetchone():
                 raise DocumentError('session_busy', 'Another run is active.', 409)
             current_rule = db.execute('SELECT rule_version FROM sessions WHERE session_id=?', (session_id,)).fetchone()[0]
@@ -526,6 +530,8 @@ class ConversationRuns:
             db.execute("UPDATE conversation_runs SET status='queued',stop_requested=0,error=NULL,failed_receipt_key=NULL,replies=? WHERE run_id=?", (_json(replies), run_id))
         self._bound[run_id] = service
         self._accepted.add(run_id)
+        if hasattr(self, 'exploration'):
+            self.exploration.preempt()
         return self.inspect(session_id, run_id)
 
     def _model(self, service, run_id, payload, budget):

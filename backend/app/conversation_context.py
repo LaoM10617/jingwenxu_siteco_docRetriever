@@ -84,7 +84,7 @@ class ConversationContext:
     def _artifact_references(self, db, sid, snapshot_id, purpose, explicit_sources):
         references = []
         rows = db.execute('''SELECT artifact_id,kind,scope,invalidated FROM artifact_records
-            WHERE session_id=? ORDER BY rowid DESC LIMIT 24''', (sid,)).fetchall()
+            WHERE session_id=? AND context_visible=1 ORDER BY rowid DESC LIMIT 24''', (sid,)).fetchall()
         accepted = self.artifacts._snapshot(db, sid, snapshot_id) if snapshot_id is not None else None
         explicit = None if explicit_sources is None else tuple(
             ref if isinstance(ref, DocumentVersion) else DocumentVersion.model_validate(ref) for ref in explicit_sources)

@@ -51,8 +51,8 @@ def run_case(target, image, mode):
     target.mkdir(parents=True)
     database = target / 'app.sqlite3'
     with sqlite3.connect(database) as db:
-        db.execute('CREATE TABLE conversation_runs(run_id TEXT PRIMARY KEY,stop_requested INTEGER)')
-        db.execute("INSERT INTO conversation_runs VALUES ('r',0)")
+        db.execute("CREATE TABLE conversation_runs(run_id TEXT PRIMARY KEY,stop_requested INTEGER,kind TEXT DEFAULT 'foreground')")
+        db.execute("INSERT INTO conversation_runs(run_id,stop_requested) VALUES ('r',0)")
     jobs = ExecutionJobs(database, expected_image=image)
     task = TaskPackage(session_id='s', turn_id='t', run_id='r', task_id='task',
                        specialist='csv', objective='Lifecycle probe', scope=ScopeSnapshot(documents=()))

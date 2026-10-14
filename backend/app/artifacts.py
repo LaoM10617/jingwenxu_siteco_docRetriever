@@ -28,6 +28,9 @@ class ArtifactStore:
                         (session_id,artifact_id) ON DELETE CASCADE);
             ''')
 
+            if 'context_visible' not in {row['name'] for row in db.execute('PRAGMA table_info(artifact_records)')}:
+                db.execute('ALTER TABLE artifact_records ADD COLUMN context_visible INTEGER NOT NULL DEFAULT 1')
+
     @contextmanager
     def _db(self):
         db = sqlite3.connect(self.database, timeout=30)

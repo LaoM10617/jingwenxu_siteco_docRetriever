@@ -1,4 +1,4 @@
-name: document-chat
+name: ${COMPOSE_PROJECT_NAME:-document-chat}
 
 services:
   frontend:
@@ -39,3 +39,5 @@ services:
       - type: bind
         source: ${HOST_DATA_DIR:-./data/runtime}
         target: /app/runtime
+        bind:
+          create_host_path: false

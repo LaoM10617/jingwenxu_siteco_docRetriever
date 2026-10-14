@@ -16,11 +16,14 @@ a LangGraph conversation agent, PDF/CSV specialist graphs and isolated Python
 computation. The existing UI supports chat, citations, tables, charts and recovery;
 the visual redesign and independent developer interface are future work.
 
-**Current status:** stages A–F have completed their recorded validation. Stage G
-background exploration is implemented in the working tree but has not completed
-full integration or real-provider acceptance. Building this checkout includes
-those G changes. See [plan.md](plan.md), [stage-f-log.md](stage-f-log.md) and
-[stage-g-log.md](stage-g-log.md) for evidence and limitations.
+**Current status (2026-10-14):** G background exploration is implemented in the
+working tree. Cross-platform regression, real-provider probes, browser smoke
+testing and final code review have recorded results; the review fix has targeted
+regression coverage. Documentation/interface handoff is available; the final
+delivery summary remains the next step. G changes are not committed. Building
+this checkout includes them; building only commit `4c05c32` does not. The normal
+application instance has not been upgraded; temporary validation instances were
+stopped. See [plan.md](plan.md) and [stage-g-log.md](stage-g-log.md) for exact scope.
 
 ## 2. Architecture
 
@@ -246,8 +249,9 @@ Current boundaries:
   basic bar/line/scatter previews; large-file export is not implemented.
 - Model planning, summaries and review do not prove arbitrary semantic correctness.
   Ambiguous joins/fields/formats require clarification. No silent provider fallback.
-- G exploration's final integration/real-provider acceptance is pending. UI redesign
-  and a dedicated developer mode are not implemented.
+- Exploration controls and developer observations remain API-only. UI redesign
+  and a dedicated developer mode are not implemented; handoff contracts and real
+  examples are in [ui-developer-handoff.md](ui-developer-handoff.md).
 
 **Tokenizer troubleshooting:** `voyage-4-tokenizer.json` must be under the active
 `DATA_DIR/tokenizers`. Local `DATA_DIR` and Docker `HOST_DATA_DIR` identify different
@@ -258,13 +262,27 @@ For Docker, the mounted directory appears as `/app/runtime` inside the container
 
 ## 5. Validation and historical evaluation
 
-The last completed A–F full regression, recorded on 2026-10-12, passed on Windows
-and Linux with **554 passed, 15 skipped and 10 subtests passed** on each platform;
-the frontend build and 10 browser tests also passed. F real-provider validation
-covered Gemini/Voyage, PDF-to-CSV coordination and isolated pandas through a
-cross-fix resumed session. Historical partial answers remain partial; this was
-not a clean final-code run from an empty database. These results do not certify
-the current G working tree. See [F evidence](stage-f-log.md) and [G progress](stage-g-log.md).
+Recorded G validation (2026-10-13–14):
+
+| Check | Result and scope |
+| --- | --- |
+| Windows / Linux backend full suites | Each: **571 passed, 15 skipped, 10 subtests passed** |
+| Opt-in real Docker isolation / pandas | **15 passed**, covering the skipped cases separately |
+| Frontend | TypeScript/production build passed; **10 browser tests passed** with mocked APIs |
+| Real background exploration | Gemini + host worker + pandas passed; 11,386 rows / 18 columns independently checked |
+| Real application smoke | Docker UI/backend + host worker; PDF upload/citation preview, CSV sum, stop and reload passed |
+| Final code review | One P2 preemption side-effect fixed and reviewed; **37 affected tests passed** afterward |
+
+The full suites and real smoke precede the final preemption fix; they were not
+rerun after it. The smoke used five generation calls and two CSV execution
+attempts (first script failed, bounded repair succeeded). A browser assertion
+was corrected and the same saved session reused without repeating paid answers.
+These are scoped checks, not proof of arbitrary model/code correctness or a
+deployment of the normal instance. Exact commands and receipts: [G log](stage-g-log.md).
+
+F real-provider validation remains a cross-fix resumed session. Historical
+partial answers remain partial; it was not a clean final-code run from an empty
+database. Preserve those qualifications when reusing [F evidence](stage-f-log.md).
 
 Run backend tests after installing the development lock file:
 

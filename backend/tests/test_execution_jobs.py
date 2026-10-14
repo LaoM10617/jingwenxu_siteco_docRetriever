@@ -12,8 +12,8 @@ from app.documents import DocumentError
 def test_pull_execution_is_durable_and_replay_does_not_execute_twice(tmp_path):
     database = tmp_path / 'app.sqlite3'
     with sqlite3.connect(database) as db:
-        db.execute('CREATE TABLE conversation_runs(run_id TEXT PRIMARY KEY, stop_requested INTEGER)')
-        db.execute("INSERT INTO conversation_runs VALUES ('r', 0)")
+        db.execute("CREATE TABLE conversation_runs(run_id TEXT PRIMARY KEY, stop_requested INTEGER, kind TEXT DEFAULT 'foreground')")
+        db.execute("INSERT INTO conversation_runs(run_id,stop_requested) VALUES ('r', 0)")
     jobs = ExecutionJobs(database, poll_seconds=.01)
     task = TaskPackage(session_id='s', turn_id='t', run_id='r', task_id='task',
                        objective='sum', specialist='csv', scope=ScopeSnapshot(documents=()))
@@ -39,8 +39,8 @@ def test_pull_execution_is_durable_and_replay_does_not_execute_twice(tmp_path):
 def execution(tmp_path):
     database = tmp_path / 'app.sqlite3'
     with sqlite3.connect(database) as db:
-        db.execute('CREATE TABLE conversation_runs(run_id TEXT PRIMARY KEY, stop_requested INTEGER)')
-        db.execute("INSERT INTO conversation_runs VALUES ('r', 0)")
+        db.execute("CREATE TABLE conversation_runs(run_id TEXT PRIMARY KEY, stop_requested INTEGER, kind TEXT DEFAULT 'foreground')")
+        db.execute("INSERT INTO conversation_runs(run_id,stop_requested) VALUES ('r', 0)")
     task = TaskPackage(session_id='s', turn_id='t', run_id='r', task_id='task',
                        objective='sum', specialist='csv', scope=ScopeSnapshot(documents=()))
     return ExecutionJobs(database, poll_seconds=.01, lease_seconds=.1), task

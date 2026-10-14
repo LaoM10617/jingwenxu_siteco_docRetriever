@@ -1,5 +1,9 @@
 # CSV execution worker
 
+For fresh-instance setup, tokenizer preparation, secrets, and consistent migration /
+backup of the backend and worker stores, see [deployment.md](../deployment.md).
+The worker is a separate host process; `docker compose up` alone does not start it.
+
 Build the Linux/amd64 pandas runner from the repository root:
 
 ```powershell
@@ -39,7 +43,8 @@ network, read-only root/input mounts, non-root user, dropped capabilities, 1 CPU
 256 MiB memory, 64 PIDs, and fixed BLAS thread limits. Execution is limited to
 30 seconds and 16 MiB combined output; graph/model deadlines are separate. Results
 are bounded JSON (20,000 rows / 100 columns / 16 MiB), stored in business SQLite;
-large-file export and automatic background exploration are later work.
+large-file export is not implemented. Background exploration uses the same trusted
+worker and result store; it does not require a second runner or Docker daemon.
 
 Validation:
 

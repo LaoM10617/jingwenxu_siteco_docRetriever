@@ -85,10 +85,18 @@ class ExecutionJobs:
                 if not self._available(db, payload):
                     raise DocumentError('source_unavailable', 'Execution sources or run are unavailable.', 409)
                 existing = db.execute('SELECT * FROM execution_jobs WHERE job_id=?', (job_id,)).fetchone()
+                run = db.execute('SELECT kind FROM conversation_runs WHERE run_id=?', (task.run_id,)).fetchone()
                 if existing and existing['result']:
                     previous = ExecutionResult(**json.loads(existing['result']))
                     if previous.cleaned_up and previous.status not in ('cancelled', 'timed_out', 'interrupted'):
+                        if run['kind'] == 'background':
+                            db.execute("UPDATE csv_explorations SET timings=json_set(timings,'$.execution_cache_hits',COALESCE(json_extract(timings,'$.execution_cache_hits'),0)+1) WHERE exploration_id=?", (task.run_id,))
                         return previous
+                if run['kind'] == 'background':
+                    exploration = db.execute('SELECT execution_calls FROM csv_explorations WHERE exploration_id=?', (task.run_id,)).fetchone()
+                    if exploration is None or exploration[0] >= 2:
+                        raise DocumentError('exploration_execution_budget', 'The exploration execution budget was reached.', 409)
+                    db.execute('UPDATE csv_explorations SET execution_calls=execution_calls+1 WHERE exploration_id=?', (task.run_id,))
                 # Only this explicit execute invocation may requeue an interrupted job.
                 db.execute('''INSERT INTO execution_jobs
                     (job_id,session_id,run_id,task_id,request_hash,payload,status,created_at)
@@ -163,6 +171,11 @@ class ExecutionJobs:
                 return False
             db.execute('UPDATE execution_jobs SET status=?,result=? WHERE job_id=?',
                        (result['status'], encoded, job_id))
+            run = db.execute('SELECT kind FROM conversation_runs WHERE run_id=?', (row['run_id'],)).fetchone()
+            if run['kind'] == 'background':
+                # Includes failed attempts; duplicate delivery returns above.
+                db.execute("UPDATE csv_explorations SET timings=json_set(timings,'$.compute_seconds',COALESCE(json_extract(timings,'$.compute_seconds'),0)+?) WHERE exploration_id=?",
+                           (result.get('seconds', {}).get('total', 0), row['run_id']))
             return True
 
     def purge_session(self, session_id, *, db=None):

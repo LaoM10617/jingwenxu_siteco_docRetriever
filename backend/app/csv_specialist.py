@@ -187,6 +187,22 @@ def _calculation_summary(value):
     return result
 
 
+def csv_overview(tables):
+    """Exact full-population profile; examples are explicitly bounded samples."""
+    profiles = []
+    for table in tables:
+        columns = []
+        for index, name in enumerate(table['headers']):
+            values = [r['values'][index] for r in table['rows']]
+            examples = list(dict.fromkeys(values))[:3]
+            columns.append({'name': name, 'blank_count': sum(not v.strip() for v in values),
+                'distinct_count': len(set(values)), 'examples': [v[:200] for v in examples],
+                'examples_truncated': any(len(v) > 200 for v in examples)})
+        profiles.append({'source': table['source'], 'original_filename': table['original_filename'],
+            'row_count': len(table['rows']), 'columns': columns})
+    return profiles
+
+
 class CsvSpecialist:
     def __init__(self, answer_service, executor, artifacts=None):
         self.answers, self.executor, self.artifacts = answer_service, executor, artifacts
@@ -222,17 +238,7 @@ class CsvSpecialist:
             if task.specialist != 'csv' or not task.scope.documents:
                 raise DocumentError('invalid_csv_task', 'CSV analysis requires CSV sources.', 422)
             tables = documents.csv_snapshot(task.session_id, task.scope.documents)
-            profiles = []
-            for table in tables:
-                columns = []
-                for index, name in enumerate(table['headers']):
-                    values = [r['values'][index] for r in table['rows']]
-                    examples = list(dict.fromkeys(values))[:3]
-                    columns.append({'name': name, 'blank_count': sum(not v.strip() for v in values),
-                        'distinct_count': len(set(values)), 'examples': [v[:200] for v in examples],
-                        'examples_truncated': any(len(v) > 200 for v in examples)})
-                profiles.append({'source': table['source'], 'original_filename': table['original_filename'],
-                    'row_count': len(table['rows']), 'columns': columns})
+            profiles = csv_overview(tables)
             reusable = []
             if task.input_artifacts and self.artifacts is None:
                 raise DocumentError('artifact_not_reusable', 'Referenced CSV results are not available.', 409)

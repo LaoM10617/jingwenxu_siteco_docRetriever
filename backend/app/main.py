@@ -32,6 +32,8 @@ from app.pdf_specialist import PdfSpecialist
 from app.run_api import router as run_router, developer_router
 from app.run_cleanup import retry_purges
 from app.execution_jobs import ExecutionJobs
+from app.csv_exploration import CsvExploration
+from app.exploration_api import router as exploration_router, developer_router as exploration_developer_router
 from app.execution_api import router as execution_router
 
 VERSION = "0.1.0"
@@ -94,12 +96,15 @@ def create_app(settings: Settings | None = None, *, processor=None, model=None) 
             app.state.run_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='conversation')
             app.state.run_schedule_lock = Lock()
             app.state.scheduled_runs = set()
+            app.state.exploration = CsvExploration(app.state.runs)
+            app.state.exploration.start()
         except (OSError, sqlite3.Error):
             raise StartupError("Upload storage initialization failed; check permissions and database") from None
         try:
             yield
         finally:
             app.state.runs.shutdown()
+            await run_in_threadpool(app.state.exploration.shutdown)
             await run_in_threadpool(app.state.run_executor.shutdown, wait=True)
             await run_in_threadpool(app.state.documents.stop)
 
@@ -119,6 +124,8 @@ def create_app(settings: Settings | None = None, *, processor=None, model=None) 
     app.include_router(run_router)
     app.include_router(developer_router)
     app.include_router(execution_router)
+    app.include_router(exploration_router)
+    app.include_router(exploration_developer_router)
 
     @app.exception_handler(DocumentError)
     async def document_error(request, exc):
