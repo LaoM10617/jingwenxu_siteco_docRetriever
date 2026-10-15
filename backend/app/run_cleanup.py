@@ -1,6 +1,7 @@
 """Durable cleanup intent across the business and checkpoint databases."""
-import sqlite3
 from langgraph.checkpoint.sqlite import SqliteSaver
+
+from app.db import connect as sqlite_connect
 
 
 def retry_purges(runs):
@@ -9,7 +10,7 @@ def retry_purges(runs):
         ids = [row[0] for row in db.execute('SELECT run_id FROM conversation_purges')]
     if not ids:
         return
-    with sqlite3.connect(runs.checkpoints) as checkpoint:
+    with sqlite_connect(runs.checkpoints) as checkpoint:
         saver = SqliteSaver(checkpoint)
         saver.setup()
         for run_id in ids:
@@ -24,12 +25,16 @@ def retry_purges(runs):
 
 
 def invalidate_source(db, version_id):
-    """Called in permanent deletion's transaction, before removing original data."""
+    """Called in permanent deletion's transaction, before removing original data.
+
+    Deletes rows only; the matching on-disk payload files become orphans that
+    the next ExecutionJobs startup sweep removes (see execution_jobs.py).
+    """
     if not db.execute("SELECT 1 FROM sqlite_master WHERE name='conversation_runs'").fetchone():
         return
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='execution_jobs'").fetchone():
         db.execute('''DELETE FROM execution_jobs WHERE job_id IN (
-            SELECT j.job_id FROM execution_jobs j, json_each(j.payload, '$.task.scope.documents') d
+            SELECT j.job_id FROM execution_jobs j, json_each(j.task_json, '$.scope.documents') d
             WHERE json_extract(d.value, '$.version_id')=?)''', (version_id,))
     db.execute('CREATE TABLE IF NOT EXISTS conversation_purges (run_id TEXT PRIMARY KEY)')
     ids = [row[0] for row in db.execute('''SELECT r.run_id FROM conversation_runs r

@@ -8,6 +8,7 @@ import sqlite3
 import faiss
 import numpy as np
 
+from app.db import connect as sqlite_connect
 from app.parsing import PARSER_VERSION
 
 CONFIG = {'model': 'voyage-4', 'dimensions': 1024, 'dtype': 'float32',
@@ -57,7 +58,7 @@ class PdfIndex:
 class PdfStore:
     def __init__(self, database):
         self.database = database
-        with closing(sqlite3.connect(database)) as db:
+        with closing(sqlite_connect(database)) as db:
             db.execute('''CREATE TABLE IF NOT EXISTS pdf_artifacts (
                 document_id TEXT PRIMARY KEY, metadata TEXT NOT NULL,
                 vectors BLOB NOT NULL, digest TEXT NOT NULL)''')
@@ -70,7 +71,7 @@ class PdfStore:
                    (document_id, metadata, vectors, digest))
 
     def restore(self, document_id):
-        with closing(sqlite3.connect(self.database)) as db:
+        with closing(sqlite_connect(self.database)) as db:
             row = db.execute('SELECT metadata,vectors,digest FROM pdf_artifacts WHERE document_id=?',
                              (document_id,)).fetchone()
         if row is None:

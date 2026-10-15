@@ -5,6 +5,7 @@ import sqlite3
 from uuid import uuid4
 
 from app.agent_protocol import DocumentVersion, ResolvedReference, ScopeSnapshot
+from app.db import connect as sqlite_connect
 
 
 def _error(code, message, status=409):
@@ -55,7 +56,7 @@ class SessionStore:
 
     @contextmanager
     def _db(self, *, write=False):
-        db = sqlite3.connect(self.database, timeout=30)
+        db = sqlite_connect(self.database)
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA foreign_keys=ON')
         try:

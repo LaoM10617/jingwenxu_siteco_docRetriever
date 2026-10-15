@@ -18,6 +18,7 @@ from app.agent_protocol import (DocumentVersion, EvidenceDescriptor, ExecutionBu
                                 ScopeSnapshot, SourceScope, TaskPackage, TaskResult, validate_result)
 from app.artifacts import ArtifactStore
 from app.conversation_context import ConversationContext, InteractionSummary
+from app.db import connect as sqlite_connect
 from app.documents import DocumentError
 from app.questions import QuestionBudget
 from app.sessions import SessionStore
@@ -266,7 +267,7 @@ class ConversationRuns:
 
     @contextmanager
     def _db(self):
-        db = sqlite3.connect(self.database, timeout=30)
+        db = sqlite_connect(self.database)
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA foreign_keys=ON')
         try:
@@ -289,7 +290,7 @@ class ConversationRuns:
 
     @contextmanager
     def _session_lock(self, sid):
-        db = sqlite3.connect(self._lock_path(sid), timeout=30)
+        db = sqlite_connect(self._lock_path(sid))
         try:
             db.execute('BEGIN IMMEDIATE')
             yield
@@ -889,7 +890,7 @@ class ConversationRuns:
                 self._after_publish()
             return {}
 
-        connection = sqlite3.connect(self.checkpoints, timeout=30, check_same_thread=False)
+        connection = sqlite_connect(self.checkpoints, check_same_thread=False)
         try:
             graph = StateGraph(_State)
             for name, node in (('intent', intent), ('clarify', clarify), ('scope', scope), ('answer', answer), ('publish', publish)):
@@ -909,46 +910,47 @@ class ConversationRuns:
         sid = row['session_id']
         with self._session_lock(sid):
             row = self._row(run_id)
-            if row['status'] in ('completed', 'stopped', 'waiting', 'failed'):
-                return self.inspect(sid, run_id)
-            service = self._bound.get(run_id) or self.bindings.answers()
-            budget = _Budget(self, run_id)
-            try:
-                if self._behavior(service.config_snapshot) != self._behavior(json.loads(row['config'])):
-                    raise DocumentError('config_changed', 'Run settings changed.', 409)
-                budget.check()
-                from copy import copy
-                service = copy(service)
-                service.model = _RunModel(self, run_id, service.model)
-                self.sessions.append_message(sid, run_id + ':question', 'user', json.loads(row['request'])['question'])
-                with self._db() as db:
-                    db.execute("UPDATE conversation_runs SET status='running',error=NULL WHERE run_id=?", (run_id,))
-                with self._graph(row, service, budget) as graph:
-                    config = {'configurable': {'thread_id': run_id}, 'recursion_limit': 30}
-                    snapshot = graph.get_state(config)
-                    if not snapshot.values:
-                        value = {'run_id': run_id, 'clarifications': []}
-                    elif any(task.interrupts for task in snapshot.tasks):
-                        current = self._row(run_id)
-                        replies = json.loads(current['replies'])
-                        value = Command(resume=replies[str(current['clarification_index'])])
-                    else:
-                        value = None
-                    graph.invoke(value, config, durability='sync')
-                    if any(task.interrupts for task in graph.get_state(config).tasks):
-                        with self._db() as db:
-                            db.execute("UPDATE conversation_runs SET status='waiting' WHERE run_id=? AND stop_requested=0", (run_id,))
-            except Exception as error:
-                code = error.code if isinstance(error, DocumentError) else 'run_failed'
-                with self._db() as db:
-                    current = db.execute('SELECT status,stop_requested FROM conversation_runs WHERE run_id=?', (run_id,)).fetchone()
-                    if current and current['status'] != 'completed':
-                        stopped = current['stop_requested'] or code == 'run_stopped'
-                        failed_receipt = (getattr(service.model, 'last_receipt_key', None)
-                                          if code.startswith(('invalid_csv_', 'invalid_pdf_')) else None)
-                        db.execute('UPDATE conversation_runs SET status=?,error=?,failed_receipt_key=? WHERE run_id=?',
-                                   ('stopped' if stopped else 'failed', None if stopped else code, failed_receipt, run_id))
-                        self._event(db, run_id, 'failure:' + str(uuid4()), 'developer', 'error', {'node': 'execution', 'code': code, 'type': type(error).__name__})
-                        if not stopped:
-                            self._event(db, run_id, 'error', 'user', 'error', {'message': 'The run could not finish. Review sources or settings, then resume.'})
-            return self.inspect(sid, run_id)
+            if row['status'] not in ('completed', 'stopped', 'waiting', 'failed'):
+                service = self._bound.get(run_id) or self.bindings.answers()
+                budget = _Budget(self, run_id)
+                try:
+                    if self._behavior(service.config_snapshot) != self._behavior(json.loads(row['config'])):
+                        raise DocumentError('config_changed', 'Run settings changed.', 409)
+                    budget.check()
+                    from copy import copy
+                    service = copy(service)
+                    service.model = _RunModel(self, run_id, service.model)
+                    self.sessions.append_message(sid, run_id + ':question', 'user', json.loads(row['request'])['question'])
+                    with self._db() as db:
+                        db.execute("UPDATE conversation_runs SET status='running',error=NULL WHERE run_id=?", (run_id,))
+                    with self._graph(row, service, budget) as graph:
+                        config = {'configurable': {'thread_id': run_id}, 'recursion_limit': 30}
+                        snapshot = graph.get_state(config)
+                        if not snapshot.values:
+                            value = {'run_id': run_id, 'clarifications': []}
+                        elif any(task.interrupts for task in snapshot.tasks):
+                            current = self._row(run_id)
+                            replies = json.loads(current['replies'])
+                            value = Command(resume=replies[str(current['clarification_index'])])
+                        else:
+                            value = None
+                        graph.invoke(value, config, durability='sync')
+                        if any(task.interrupts for task in graph.get_state(config).tasks):
+                            with self._db() as db:
+                                db.execute("UPDATE conversation_runs SET status='waiting' WHERE run_id=? AND stop_requested=0", (run_id,))
+                except Exception as error:
+                    code = error.code if isinstance(error, DocumentError) else 'run_failed'
+                    with self._db() as db:
+                        current = db.execute('SELECT status,stop_requested FROM conversation_runs WHERE run_id=?', (run_id,)).fetchone()
+                        if current and current['status'] != 'completed':
+                            stopped = current['stop_requested'] or code == 'run_stopped'
+                            failed_receipt = (getattr(service.model, 'last_receipt_key', None)
+                                              if code.startswith(('invalid_csv_', 'invalid_pdf_')) else None)
+                            db.execute('UPDATE conversation_runs SET status=?,error=?,failed_receipt_key=? WHERE run_id=?',
+                                       ('stopped' if stopped else 'failed', None if stopped else code, failed_receipt, run_id))
+                            self._event(db, run_id, 'failure:' + str(uuid4()), 'developer', 'error', {'node': 'execution', 'code': code, 'type': type(error).__name__})
+                            if not stopped:
+                                self._event(db, run_id, 'error', 'user', 'error', {'message': 'The run could not finish. Review sources or settings, then resume.'})
+        # inspect() only reads state to format a response; releasing the session
+        # lock before this avoids holding it through unrelated read traffic.
+        return self.inspect(sid, run_id)

@@ -5,6 +5,7 @@ import re
 import sqlite3
 import unicodedata
 
+from app.db import connect as sqlite_connect
 from app.documents import DocumentError
 from app.embeddings import EmbeddingError
 from app.pdf_store import normalize
@@ -126,7 +127,7 @@ class FtsStore:
     """
     def __init__(self, database):
         self.database = database
-        with closing(sqlite3.connect(database)) as db:
+        with closing(sqlite_connect(database)) as db:
             db.execute('''CREATE VIRTUAL TABLE IF NOT EXISTS pdf_fts USING fts5(
                 document_id UNINDEXED, evidence_id UNINDEXED, payload UNINDEXED,
                 text, literal_keys, tokenize='unicode61 remove_diacritics 0')''')
@@ -150,7 +151,7 @@ class FtsStore:
         if connection is not None:
             write(connection)
         else:
-            with closing(sqlite3.connect(self.database)) as db, db:
+            with closing(sqlite_connect(self.database)) as db, db:
                 write(db)
 
     def search(self, question, document_ids, top_k):
@@ -164,7 +165,7 @@ class FtsStore:
         if not clauses:
             return []
         placeholders = ','.join('?' for _ in document_ids)
-        with closing(sqlite3.connect(self.database)) as db:
+        with closing(sqlite_connect(self.database)) as db:
             rows = db.execute(f'''SELECT document_id,evidence_id,payload,bm25(pdf_fts) FROM pdf_fts
                 WHERE pdf_fts MATCH ? AND document_id IN ({placeholders})
                 ORDER BY bm25(pdf_fts),document_id,evidence_id LIMIT ?''',

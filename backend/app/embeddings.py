@@ -10,6 +10,8 @@ import time
 
 import numpy as np
 
+from app.db import connect as sqlite_connect
+
 PREFIXES = {'document': 'Represent the document for retrieval: ',
             'query': 'Represent the query for retrieving supporting documents: '}
 
@@ -35,14 +37,14 @@ class BudgetScheduler:
         self.condition = Condition()
         self.pending, self.sequence, self.busy = [], 0, False
         self.max_pending, self.max_wait = max_pending, max_wait
-        with closing(sqlite3.connect(database)) as db:
+        with closing(sqlite_connect(database)) as db:
             db.execute('CREATE TABLE IF NOT EXISTS embedding_budget (sent_at REAL NOT NULL, tokens INTEGER NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS embedding_cooldown (id INTEGER PRIMARY KEY CHECK(id=1), until_at REAL NOT NULL)')
 
     def defer(self, seconds):
         if not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds < 0:
             seconds = 60
-        with self.condition, closing(sqlite3.connect(self.database)) as db, db:
+        with self.condition, closing(sqlite_connect(self.database)) as db, db:
             db.execute('INSERT INTO embedding_cooldown VALUES (1,?) ON CONFLICT(id) DO UPDATE SET until_at=MAX(until_at,excluded.until_at)', (self.now() + seconds,))
             self.condition.notify_all()
 
@@ -66,7 +68,7 @@ class BudgetScheduler:
                     eligible = not self.busy and ticket == min(self.pending)
                     delay = .1
                     if eligible:
-                        with closing(sqlite3.connect(self.database)) as db, db:
+                        with closing(sqlite_connect(self.database)) as db, db:
                             db.execute('BEGIN IMMEDIATE')
                             db.execute('DELETE FROM embedding_budget WHERE sent_at<=?', (now - 60,))
                             events = db.execute('SELECT sent_at,tokens FROM embedding_budget ORDER BY sent_at').fetchall()
@@ -100,7 +102,7 @@ class BudgetScheduler:
             if isinstance(result, EmbeddingResponse):
                 if type(result.total_tokens) is not int or result.total_tokens < 0:
                     raise EmbeddingError('embedding_invalid_usage')
-                with closing(sqlite3.connect(self.database)) as db, db:
+                with closing(sqlite_connect(self.database)) as db, db:
                     db.execute('UPDATE embedding_budget SET tokens=MAX(tokens,?) WHERE rowid=?',
                                (result.total_tokens, admission))
             return result
@@ -119,7 +121,7 @@ class EmbeddingGateway:
     def __init__(self, database, provider, count_tokens, scheduler, *, model='voyage-4'):
         self.database, self.provider, self.count_tokens = database, provider, count_tokens
         self.scheduler, self.model = scheduler, model
-        with closing(sqlite3.connect(database)) as db:
+        with closing(sqlite_connect(database)) as db:
             db.execute('CREATE TABLE IF NOT EXISTS embedding_cache (cache_key TEXT PRIMARY KEY, vector BLOB NOT NULL)')
 
     def _key(self, text, input_type):
@@ -149,7 +151,7 @@ class EmbeddingGateway:
             raise EmbeddingError('embedding_interrupted')
         unique = list(dict.fromkeys(texts))
         found, missing = {}, []
-        with closing(sqlite3.connect(self.database)) as db:
+        with closing(sqlite_connect(self.database)) as db:
             for text in unique:
                 row = db.execute('SELECT vector FROM embedding_cache WHERE cache_key=?', (self._key(text, input_type),)).fetchone()
                 if row:
@@ -192,7 +194,7 @@ class EmbeddingGateway:
             vectors = self._vectors(values, len(batch))
             if stop.is_set():
                 raise EmbeddingError('embedding_interrupted')
-            with closing(sqlite3.connect(self.database)) as db, db:
+            with closing(sqlite_connect(self.database)) as db, db:
                 for text, vector in zip(batch, vectors):
                     db.execute('INSERT OR REPLACE INTO embedding_cache VALUES (?,?)',
                                (self._key(text, input_type), vector.astype('<f4').tobytes()))

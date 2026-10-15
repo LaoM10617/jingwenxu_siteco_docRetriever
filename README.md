@@ -25,6 +25,12 @@ this checkout includes them; building only commit `4c05c32` does not. The normal
 application instance has not been upgraded; temporary validation instances were
 stopped. See [plan.md](plan.md) and [stage-g-log.md](stage-g-log.md) for exact scope.
 
+**SQLite / CSV worker update (2026-10-15, uncommitted):** unified SQLite busy
+timeout, WAL for `app.sqlite3`, and execution payloads moved out of the database
+into files. Not yet verified end to end with Docker and a real worker, and existing
+databases need an `execution_jobs` migration before CSV execution works. Details
+and known issues: [CHANGELOG.md](CHANGELOG.md).
+
 ## 2. Architecture
 
 ```mermaid
@@ -36,12 +42,39 @@ flowchart TD
     PDF --> Search[Hybrid retrieval and coverage reading]
     CSV --> Jobs[Persistent execution jobs]
     Explore[Bounded background CSV exploration] --> CSV
-    Main --> Business[(Business SQLite)]
-    Main --> Checkpoints[(LangGraph checkpoint SQLite)]
-    Jobs --> Business
-    Worker[Trusted host worker] -->|Authenticated claim / heartbeat / result| Jobs
+    subgraph Data["DATA_DIR — every SQLite connection via app.db.connect (30 s busy timeout)"]
+        Business[("app.sqlite3 (WAL)<br/>business state + job lease/status rows")]
+        Checkpoints[("conversation-checkpoints.sqlite3")]
+        Payloads["execution_payloads/job_id.json<br/>script + CSV inputs"]
+    end
+    Main --> Business
+    Main --> Checkpoints
+    Search --> Business
+    Jobs -->|"small rows: task_json, lease, result"| Business
+    Jobs -->|"large payload, written outside transactions"| Payloads
+    Worker[Trusted host worker] -->|"Authenticated claim / heartbeat / result (35 s HTTP timeout)"| Jobs
     Worker -->|Docker CLI| Sandbox[Disposable isolated pandas container]
     Sandbox -->|Bounded result JSON| Worker
+```
+
+CSV execution job lifecycle (lock-sensitive steps):
+
+```mermaid
+sequenceDiagram
+    participant S as CSV specialist (execute)
+    participant F as execution_payloads/
+    participant DB as app.sqlite3
+    participant W as Host worker
+    S->>F: write job_id.json atomically (no transaction open)
+    S->>DB: BEGIN IMMEDIATE — check sources, insert queued row (task_json only)
+    W->>DB: claim — BEGIN IMMEDIATE, select queued job, write lease, commit
+    W->>F: read script + inputs after the lock is released
+    loop until result, timeout or stop
+        S->>DB: plain read of status / lease / result (no write lock)
+        W->>DB: heartbeat renews lease
+    end
+    W->>DB: submit result
+    Note over S,DB: Only an expired lease escalates to a write transaction, re-checked before marking the job interrupted
 ```
 
 - **Conversation agent:** resolves intent and references, enforces session source
@@ -59,10 +92,24 @@ flowchart TD
   and starts pinned pandas containers. Containers have no network, application
   keys or Docker socket and have bounded resources. Neither the backend nor
   generated scripts receive Docker control; only the host worker does.
-- **Persistence:** `app.sqlite3` owns documents, sessions, rules, tasks, artifacts
-  and receipts; `conversation-checkpoints.sqlite3` stores graph checkpoints.
-  Originals and tokenizer assets live beside the databases. The worker has its
-  own instance/receipt store and never accesses the backend database directly.
+- **Persistence:** `app.sqlite3` owns documents, sessions, rules, tasks, artifacts,
+  receipts and execution-job metadata; `conversation-checkpoints.sqlite3` stores
+  graph checkpoints. Originals and tokenizer assets live beside the databases. The
+  worker has its own instance/receipt store and never accesses the backend
+  database directly.
+- **SQLite concurrency:** all backend connections go through `app.db.connect`
+  with one 30 s busy timeout, so lock contention behaves the same in every module
+  (non-blocking try-locks and the 1 s startup check are deliberate exceptions).
+  Startup switches `app.sqlite3` to WAL with `synchronous=NORMAL`, so readers do
+  not wait behind writers; back up the `-wal`/`-shm` files with the database or
+  stop the backend first. Storage errors still return 503 `storage_unavailable`
+  and are logged by the `siteco.storage` logger.
+- **Execution payloads:** generated scripts and CSV inputs (up to 64 MiB) are
+  stored as `DATA_DIR/execution_payloads/<job_id>.json`, not in SQLite. Write
+  transactions touch only small rows (`task_json`, lease, result), and the worker
+  reads the payload after its lease commits. Session/source purges delete payload
+  files. Startup removes files whose job row no longer exists. Permanent document
+  deletion removes the rows immediately, and the related files on the next startup.
 - **Recovery:** session history has no 24-hour expiry. The browser stores only the
   current session pointer and UI state. Interrupted conversation runs require
   explicit resume; durable receipts and stable identities prevent duplicate
@@ -207,6 +254,12 @@ Restart the host worker when its code/configuration changes. If a runner rebuild
 changes its image ID, update both backend configuration and the worker command.
 Saved runs retain their original behavior configuration and may require it to resume.
 
+Databases created before the 2026-10-15 SQLite update still have the old
+`execution_jobs.payload` column, and no automatic migration exists yet. Until one
+is added, back up the data directory and rebuild that table, which holds only
+transient job state. Otherwise CSV execution fails with `storage_unavailable`.
+See [CHANGELOG.md](CHANGELOG.md).
+
 For a separate demo instance, use different project names, ports, runtime
 and worker directories, and tokens. Backup, migration and permission details:
 [deployment.md](deployment.md). A healthy container proves service availability,
@@ -334,7 +387,8 @@ materials and your own Gemini/Voyage keys. Commands and configuration:
 | `backend/app/agent_protocol.py`, `sessions.py`, `artifacts.py` | Typed task/result contracts, source scope and persistent artifacts |
 | `backend/app/pdf_specialist.py`, `pdf_analysis.py`, `pdf_reading.py` | PDF specialist paths and coverage reading |
 | `backend/app/csv_specialist.py`, `csv_exploration.py` | CSV graph and bounded background exploration |
-| `backend/app/execution_jobs.py`, `host_worker.py`, `python_executor.py` | Durable pull jobs, trusted host control and isolation |
+| `backend/app/db.py` | Shared SQLite connection helper and busy timeout |
+| `backend/app/execution_jobs.py`, `host_worker.py`, `python_executor.py` | Durable pull jobs, file-backed payloads, trusted host control and isolation |
 | `backend/app/csv_runtime.py`, `runner/` | Container-side pandas helpers, image and locked dependencies |
 | `backend/app/documents.py`, `processing.py`, `*_parsing.py`, `*_store.py` | Document lifecycle, ingestion and structured storage |
 | `backend/app/retrieval/`, `embeddings.py`, `voyage.py`, `reranking.py` | Retrieval, embedding admission and optional reranking |
@@ -347,6 +401,7 @@ materials and your own Gemini/Voyage keys. Commands and configuration:
 | `compose.yaml`, `.env.example` | Deployment and configuration template |
 
 Architecture decisions: [decisions-design.md](decisions-design.md). Execution plan
-and stage evidence: [plan.md](plan.md). Deployment and data migration:
+and stage evidence: [plan.md](plan.md). Uncommitted change log:
+[CHANGELOG.md](CHANGELOG.md). Deployment and data migration:
 [deployment.md](deployment.md). Next UI/developer implementation entry points:
 [ui-developer-handoff.md](ui-developer-handoff.md).

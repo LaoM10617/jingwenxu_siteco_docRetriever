@@ -345,7 +345,7 @@ export default function App() {
             <Icon kind="panel" />
           </button>
           <a className="brand" href="./">
-            SITECO<span>Document chat</span>
+            Intelligent Document Analysis
           </a>
         </div>
         <button className="materials-toggle" onClick={showMaterials}>

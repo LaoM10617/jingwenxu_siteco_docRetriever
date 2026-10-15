@@ -7,6 +7,7 @@ import sqlite3
 
 from app.csv_parsing import CSV_PARSER_VERSION, HEADERS
 from app.csv_profile import profile
+from app.db import connect as sqlite_connect
 
 
 def summary(parsed):
@@ -33,7 +34,7 @@ def _digest(rows, headers=None):
 class CsvStore:
     def __init__(self, database):
         self.database = database
-        with closing(sqlite3.connect(database)) as db, db:
+        with closing(sqlite_connect(database)) as db, db:
             db.execute('''CREATE TABLE IF NOT EXISTS csv_documents (
                 document_id TEXT PRIMARY KEY, parser_version TEXT NOT NULL,
                 headers TEXT NOT NULL, record_count INTEGER NOT NULL, digest TEXT NOT NULL)''')
@@ -53,7 +54,7 @@ class CsvStore:
         rows = [(r.record_number, r.evidence_id, r.order_id, json.dumps(r.raw_values),
                  r.price_status, str(r.price) if r.price is not None else None)
                 for r in parsed.records]
-        with closing(sqlite3.connect(self.database)) as db, db:
+        with closing(sqlite_connect(self.database)) as db, db:
             self.clear(db, document_id)
             db.executemany('INSERT INTO csv_records VALUES (?,?,?,?,?,?,?)',
                            ((document_id, *r) for r in rows))
@@ -63,7 +64,7 @@ class CsvStore:
 
     def restore(self, document_id, checkpoint):
         """Validate the complete durable snapshot without parsing or provider calls."""
-        with closing(sqlite3.connect(self.database)) as db:
+        with closing(sqlite_connect(self.database)) as db:
             meta = db.execute('SELECT parser_version,headers,record_count,digest FROM csv_documents WHERE document_id=?', (document_id,)).fetchone()
             if meta is None:
                 return False
@@ -100,7 +101,7 @@ class CsvStore:
                 'price_status': row['price_status'], 'price': row['price']}
 
     def read(self, document_id, offset, limit):
-        with closing(sqlite3.connect(self.database)) as db:
+        with closing(sqlite_connect(self.database)) as db:
             db.row_factory = sqlite3.Row
             rows = db.execute('''SELECT r.*,c.headers,d.original_filename FROM csv_records r
                 JOIN csv_documents c USING(document_id) JOIN documents d USING(document_id)
@@ -109,7 +110,7 @@ class CsvStore:
             return [self.evidence(r) for r in rows]
 
     def lookup(self, orders, documents, offset, limit):
-        with closing(sqlite3.connect(self.database)) as db:
+        with closing(sqlite_connect(self.database)) as db:
             db.row_factory = sqlite3.Row
             db.execute('CREATE TEMP TABLE requested_orders (position INTEGER, order_id TEXT PRIMARY KEY COLLATE BINARY)')
             db.executemany('INSERT INTO requested_orders VALUES (?,?)', enumerate(orders))
@@ -132,7 +133,7 @@ class CsvStore:
                     'records': [self.evidence(r) for r in rows]}
 
     def read_one(self, document_id, evidence_id):
-        with closing(sqlite3.connect(self.database)) as db:
+        with closing(sqlite_connect(self.database)) as db:
             db.row_factory = sqlite3.Row
             row = db.execute('''SELECT r.*,c.headers,d.original_filename FROM csv_records r
                 JOIN csv_documents c USING(document_id) JOIN documents d USING(document_id)

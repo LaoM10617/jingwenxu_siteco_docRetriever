@@ -3,10 +3,17 @@ import SourcePreview from './SourcePreview';
 import ResultArtifacts from './ResultArtifacts';
 import type { Source, Turn } from './useChat';
 
-function SourceView({source}: {source: Source}) {
-  return <details className="answer-source"><summary>{source.citation_id} · {source.original_filename || source.document_id.slice(0,8)} · Page {String(source.locator.page_number ?? '')}</summary>
-    {source.context?.map((c,i) => <p key={i}>{c.text}</p>)}
-    <pre>{source.text}</pre><SourcePreview source={source} />
+function AnswerSources({sources}: {sources: Source[]}) {
+  const unique = [...new Map(sources.map(source => [
+    JSON.stringify([source.document_id, source.locator.kind,
+      source.locator.kind === 'pdf' ? source.locator.page_number : source.evidence_id]), source,
+  ])).values()];
+  if (!unique.length) return null;
+  if (unique.length === 1) return <SourcePreview source={unique[0]} />;
+  return <details className="answer-source"><summary>Open original source</summary>
+    {unique.map(source => <SourcePreview key={source.evidence_id} source={source}
+      label={`${source.original_filename || 'Original source'} · ${source.locator.kind === 'pdf'
+        ? `Page ${source.locator.page_number}` : `Record ${source.locator.record_number}`}`} />)}
   </details>;
 }
 function Controls({turn,control}:{turn:Turn;control:(t:Turn,a:'stop'|'resume',reply?:string)=>Promise<void>}) {
@@ -26,6 +33,9 @@ export default function ChatThread({turns,retry,refresh,control}:{turns:Turn[];r
   refresh:()=>void;control:(t:Turn,a:'stop'|'resume',reply?:string)=>Promise<void>}) {
   return <section className="chat-thread" aria-label="Conversation">{turns.map(turn=> {
     const task=turn.task, answer=task?.answer ?? task?.partial_answer;
+    const warnings = [...new Map((answer?.warnings ?? []).map(warning => [
+      JSON.stringify(Object.entries(warning).sort(([a], [b]) => a.localeCompare(b))), warning,
+    ])).values()];
     return <article className="chat-turn" key={turn.body.request_id}>
       <div className="user-question"><h2>You</h2><p>{turn.body.question}</p>
         {!!turn.names.length && <p className="muted">Materials: {turn.names.join(', ')}</p>}</div>
@@ -38,11 +48,13 @@ export default function ChatThread({turns,retry,refresh,control}:{turns:Turn[];r
       {answer && <div className="model-answer"><h2>{answer.outcome === 'answered' ? 'Answer' : answer.outcome}</h2>
         {!task?.answer && task?.partial_answer && <p role="status" className="answer-gap">Partial results only. The task has not finished; resume or answer the clarification to continue.</p>}
         {task?.source_available === false && <p role="status" className="answer-gap">Sources for this historical answer are no longer available in this session. It cannot be reused as current evidence.</p>}
-        {answer.segments.map((segment,i)=><div key={i}><p>{segment.text}</p>
-          {segment.citation_ids.map(id=>{const source=answer.citations.find(c=>c.citation_id===id);
-            return source ? <SourceView key={id} source={source}/> : null;})}</div>)}
+        {answer.segments.map((segment,i)=><div key={i}><p>{segment.text}</p></div>)}
+        {task?.source_available !== false && <AnswerSources sources={answer.citations.filter(source =>
+          answer.segments.some(segment => segment.citation_ids.includes(source.citation_id ?? '')))} />}
         {answer.gaps.map((gap,i)=><p key={i} className="answer-gap">{gap}</p>)}
-        {answer.warnings.map((warning,i)=><p key={i}>{warning.message}</p>)}
+        {!!warnings.length && <details className="answer-warnings"><summary>See warnings</summary>
+          {warnings.map((warning,i)=><p key={i}>{warning.page_number != null ? `Page ${warning.page_number} · ` : ''}{warning.message}</p>)}
+        </details>}
         {task && <ResultArtifacts session={task.session_id} artifacts={task.artifacts ?? []}/>}
       </div>}
       {task?.status === 'recoverable' && <button onClick={refresh}>Refresh status</button>}

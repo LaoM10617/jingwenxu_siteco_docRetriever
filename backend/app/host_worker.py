@@ -13,6 +13,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from app.db import connect as sqlite_connect
 from app.python_executor import ExecutionResult, PythonExecutor
 
 
@@ -38,7 +39,10 @@ class WorkerClient:
         request = Request(self.base_url + path, data=json.dumps(payload, allow_nan=False).encode(),
                           headers={'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'},
                           method='POST')
-        with build_opener(_NoRedirect).open(request, timeout=10) as response:
+        # Longer than the backend's own SQLite busy_timeout (app.db.BUSY_TIMEOUT_SECONDS),
+        # so a slow claim/heartbeat under lock contention returns an error response here
+        # instead of the client giving up while the server-side transaction still commits.
+        with build_opener(_NoRedirect).open(request, timeout=35) as response:
             value = response.read(70 * 1024 * 1024 + 1)
         if len(value) > 70 * 1024 * 1024:
             raise ValueError('Worker response exceeds input limit')
@@ -67,7 +71,7 @@ class HostWorker:
 
     @contextmanager
     def _db(self):
-        db = sqlite3.connect(self.database)
+        db = sqlite_connect(self.database)
         db.execute('PRAGMA secure_delete=ON')
         try:
             with db:

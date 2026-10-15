@@ -5,6 +5,35 @@ const answer = {outcome:'answered', segments:[{text:'Hello from the saved sessio
 const run = (status, extra={}) => ({run_id:'r1', request_id:'q1', session_id:'s1', question:'Hello',
   status, answer:null, error:null, ...extra});
 
+test('compact sources preserve PDF pages, CSV records and folded warnings', async ({page}) => {
+  const sources = [
+    {citation_id:'S1',document_id:'d1',evidence_id:'e1',original_filename:'slides.pdf',locator:{kind:'pdf',page_number:9}},
+    {citation_id:'S2',document_id:'d1',evidence_id:'e2',original_filename:'slides.pdf',locator:{kind:'pdf',page_number:9}},
+    {citation_id:'S3',document_id:'d2',evidence_id:'e3',original_filename:'prices.csv',locator:{kind:'csv',record_number:2}},
+  ].map(s=>({...s,text:'Hidden extracted text'}));
+  await mockGraph(page,[run('completed',{answer:{...answer,
+    segments:[{text:'Verified answer.',citation_ids:['S1','S2','S3'],calculation_ids:[]}],citations:sources,
+    warnings:[{code:'layout',message:'Layout uncertain',page_number:9},{code:'layout',message:'Layout uncertain',page_number:9}],
+  }})]);
+  await page.route('**/api/documents/*/evidence/*/preview', route => route.fulfill({json:
+    route.request().url().includes('/d1/') ? {kind:'pdf',page_number:9,width:100,height:100,regions:[],notice:null,
+      image:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>'}
+      : {kind:'csv',record_number:2,headers:['Price'],raw_values:['12,50']}}));
+  await page.goto('/');
+  await expect(page.locator('.brand')).toHaveText('Intelligent Document Analysis');
+  await expect(page.getByText('Hidden extracted text',{exact:true})).toHaveCount(0);
+  await expect(page.getByText('Page 9 · Layout uncertain',{exact:true})).not.toBeVisible();
+  await page.getByText('See warnings',{exact:true}).click();
+  await expect(page.getByText('Page 9 · Layout uncertain',{exact:true})).toHaveCount(1);
+  await expect(page.getByText('Page 9 · Layout uncertain',{exact:true})).toBeVisible();
+  await page.getByText('Open original source',{exact:true}).click();
+  await expect(page.getByRole('button',{name:'slides.pdf · Page 9',exact:true})).toHaveCount(1);
+  await page.getByRole('button',{name:'slides.pdf · Page 9',exact:true}).click();
+  await expect(page.getByRole('img',{name:'Original page 9 with source regions'})).toBeVisible();
+  await page.getByRole('button',{name:'prices.csv · Record 2',exact:true}).click();
+  await expect(page.locator('.preview-record')).toContainText('12,50');
+});
+
 async function mockGraph(page, initial=[]) {
   const state = {runs:initial, requests:[], created:0, legacy:0};
   await page.addInitScript(() => localStorage.setItem('siteco-graph-session','s1'));

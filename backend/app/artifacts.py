@@ -4,6 +4,7 @@ import json
 import sqlite3
 
 from app.agent_protocol import ScopeSnapshot
+from app.db import connect as sqlite_connect
 from app.documents import DocumentError
 from app.sessions import SessionStore
 
@@ -33,7 +34,7 @@ class ArtifactStore:
 
     @contextmanager
     def _db(self):
-        db = sqlite3.connect(self.database, timeout=30)
+        db = sqlite_connect(self.database)
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA foreign_keys=ON')
         try:

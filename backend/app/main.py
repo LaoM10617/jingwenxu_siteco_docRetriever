@@ -54,6 +54,11 @@ def create_app(settings: Settings | None = None, *, processor=None, model=None) 
             events.addHandler(logging.StreamHandler())
         events.setLevel(logging.INFO)
         events.propagate = False
+        storage_log = logging.getLogger('siteco.storage')
+        if not storage_log.handlers:
+            storage_log.addHandler(logging.StreamHandler())
+        storage_log.setLevel(logging.ERROR)
+        storage_log.propagate = False
         try:
             configuration.data_dir.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
@@ -65,6 +70,9 @@ def create_app(settings: Settings | None = None, *, processor=None, model=None) 
             raise StartupError("DATA_DIR is not writable; check the directory and permissions") from None
         try:
             with closing(sqlite3.connect(configuration.data_dir / "app.sqlite3", timeout=1)) as connection:
+                # Persisted in the database file: readers no longer block behind a writer.
+                connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute("PRAGMA synchronous=NORMAL")
                 connection.execute("BEGIN IMMEDIATE")
                 version = connection.execute("PRAGMA user_version").fetchone()[0]
                 connection.execute(f"PRAGMA user_version = {version}")
@@ -140,6 +148,8 @@ def create_app(settings: Settings | None = None, *, processor=None, model=None) 
     @app.exception_handler(sqlite3.Error)
     @app.exception_handler(OSError)
     async def storage_error(request, exc):
+        logging.getLogger('siteco.storage').error(
+            'Storage error on %s %s: %r', request.method, request.url.path, exc)
         return JSONResponse(status_code=503, content={
             'error': {'code': 'storage_unavailable', 'message': 'Document storage is unavailable.', 'retryable': True}})
 

@@ -6,7 +6,7 @@ type Preview = {kind: 'pdf'; page_number: number; width: number; height: number;
   regions: {role: 'evidence' | 'context'; box: [number, number, number, number]}[]; notice: string | null}
   | {kind: 'csv'; record_number: number; headers: string[]; raw_values: string[]};
 
-export default function SourcePreview({source}: {source: Source}) {
+export default function SourcePreview({source, label}: {source: Source; label?: string}) {
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(false);
@@ -24,10 +24,10 @@ export default function SourcePreview({source}: {source: Source}) {
     if (!open && !loading) void load();
   }
   return <div className="source-preview">
-    <button onClick={toggle} aria-expanded={open}>{open ? 'Hide original source' : 'Open original source'}</button>
+    <button onClick={toggle} aria-expanded={open}>{label ? `${open ? 'Hide · ' : ''}${label}` : open ? 'Hide original source' : 'Open original source'}</button>
     {open && <section aria-label="Original source preview">
       {loading && <p role="status">Loading original source…</p>}
-      {error && <div><p role="alert" className="error">{error} The citation text above remains available.</p>
+      {error && <div><p role="alert" className="error">{error}</p>
         <button disabled={loading} onClick={() => void load()}>Retry preview</button></div>}
       {preview?.kind === 'pdf' && <>
         <p>Page {preview.page_number} · {source.original_filename || 'Original PDF'}</p>

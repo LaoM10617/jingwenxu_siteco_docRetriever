@@ -10,6 +10,7 @@ import logging
 from queue import Queue, Empty
 from threading import RLock, Event, Thread
 
+from app.db import connect as sqlite_connect
 from app.processing import PreparedDocument, ProcessingFailure, DocumentProcessor
 from app.csv_parsing import ParsedCsvDocument
 from app.csv_store import CsvStore, summary
@@ -41,7 +42,7 @@ class DocumentService:
         self._csv_ready = set()
         self.lifecycle = None
         self.derived = None
-        with closing(sqlite3.connect(self.database)) as db, db:
+        with closing(sqlite_connect(self.database)) as db, db:
             db.execute('''CREATE TABLE IF NOT EXISTS documents (
                 document_id TEXT PRIMARY KEY, original_filename TEXT NOT NULL,
                 stored_name TEXT NOT NULL, size_bytes INTEGER, content_hash TEXT,
@@ -61,7 +62,7 @@ class DocumentService:
         """Reserve one slot atomically, including requests still receiving bytes."""
         document_id = uuid4().hex
         try:
-            with closing(sqlite3.connect(self.database)) as db, db:
+            with closing(sqlite_connect(self.database)) as db, db:
                 db.execute('BEGIN IMMEDIATE')
                 count = db.execute("SELECT COUNT(*) FROM documents WHERE status IN ('queued','processing','ready')").fetchone()[0]
                 count += db.execute('SELECT COUNT(*) FROM upload_reservations').fetchone()[0]
@@ -74,7 +75,7 @@ class DocumentService:
 
     def discard(self, document_id):
         """Release an unaccepted upload; never remove an accepted document."""
-        with closing(sqlite3.connect(self.database)) as db, db:
+        with closing(sqlite_connect(self.database)) as db, db:
             if db.execute('SELECT 1 FROM documents WHERE document_id=?', (document_id,)).fetchone():
                 return
             (self.uploads / (document_id + '.part')).unlink(missing_ok=True)
@@ -83,7 +84,7 @@ class DocumentService:
 
     def recover_receiving(self):
         """Called once at startup, before requests: discard interrupted reception."""
-        with closing(sqlite3.connect(self.database)) as db:
+        with closing(sqlite_connect(self.database)) as db:
             ids = [row[0] for row in db.execute('SELECT document_id FROM upload_reservations')]
         for document_id in ids:
             self.discard(document_id)
@@ -114,7 +115,7 @@ class DocumentService:
             temporary.replace(destination)
             bound_processor = self.processor_factory() if self.processor_factory else None
             now = datetime.now(timezone.utc).isoformat()
-            with closing(sqlite3.connect(self.database)) as db, db:
+            with closing(sqlite_connect(self.database)) as db, db:
                 db.execute('INSERT INTO documents VALUES (?,?,?,?,?,?,?,?,?,?)',
                            (document_id, filename, document_id, size, digest.hexdigest(),
                             'queued', 'queued', None, now, now))
@@ -141,7 +142,7 @@ class DocumentService:
                 raise DocumentError('storage_unavailable', 'Upload cleanup could not complete.', 503, True) from None
 
     def get(self, document_id):
-        with self._lock, closing(sqlite3.connect(self.database)) as db:
+        with self._lock, closing(sqlite_connect(self.database)) as db:
             db.row_factory = sqlite3.Row
             row = db.execute('SELECT * FROM documents WHERE document_id=?', (document_id,)).fetchone()
             parsed = db.execute('SELECT payload FROM document_parses WHERE document_id=?', (document_id,)).fetchone()
@@ -157,12 +158,12 @@ class DocumentService:
 
 
     def list(self, *, trashed=False):
-        with self._lock, closing(sqlite3.connect(self.database)) as db:
+        with self._lock, closing(sqlite_connect(self.database)) as db:
             ids = db.execute("SELECT document_id FROM documents WHERE (status='trashed')=? ORDER BY created_at, document_id", (trashed,)).fetchall()
             return [self.get(document_id) for (document_id,) in ids]
 
     def trash(self, document_id):
-        with self._lock, closing(sqlite3.connect(self.database)) as db, db:
+        with self._lock, closing(sqlite_connect(self.database)) as db, db:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT status FROM documents WHERE document_id=?', (document_id,)).fetchone()
             if row is None:
@@ -179,7 +180,7 @@ class DocumentService:
             return self.get(document_id)
 
     def restore(self, document_id):
-        with self._lock, closing(sqlite3.connect(self.database)) as db, db:
+        with self._lock, closing(sqlite_connect(self.database)) as db, db:
             db.execute('BEGIN IMMEDIATE')
             document = self.get(document_id)
             if document is None:
@@ -203,7 +204,7 @@ class DocumentService:
 
     def empty_trash(self):
         with self._lock:
-            with closing(sqlite3.connect(self.database)) as db:
+            with closing(sqlite_connect(self.database)) as db:
                 rows = db.execute("SELECT document_id FROM documents WHERE status IN ('trashed','deleting')").fetchall()
             for (document_id,) in rows:
                 self.delete(document_id)
@@ -212,7 +213,7 @@ class DocumentService:
     def delete(self, document_id):
         """Commit revocation before deleting bytes; interrupted cleanup is replayable."""
         with self._lock:
-            with closing(sqlite3.connect(self.database)) as db, db:
+            with closing(sqlite_connect(self.database)) as db, db:
                 db.execute('BEGIN IMMEDIATE')
                 row = db.execute('SELECT status, stored_name FROM documents WHERE document_id=?', (document_id,)).fetchone()
                 if row is None:
@@ -230,7 +231,7 @@ class DocumentService:
             return {'deleted': 1}
 
     def _finish_deletion(self, document_id):
-        with closing(sqlite3.connect(self.database)) as db, db:
+        with closing(sqlite_connect(self.database)) as db, db:
             row = db.execute('SELECT stored_name FROM document_deletions WHERE document_id=?', (document_id,)).fetchone()
             if row is None:
                 return
@@ -247,7 +248,7 @@ class DocumentService:
         self._csv_ready.discard(document_id)
 
     def recover_deletions(self):
-        with closing(sqlite3.connect(self.database)) as db:
+        with closing(sqlite_connect(self.database)) as db:
             pending = db.execute('SELECT document_id FROM document_deletions').fetchall()
         for (document_id,) in pending:
             self._finish_deletion(document_id)
@@ -260,7 +261,7 @@ class DocumentService:
             self._processor = processor if processor is not None else DocumentProcessor()
             self.recover_receiving()
             self.recover_deletions()
-            with closing(sqlite3.connect(self.database)) as db, db:
+            with closing(sqlite_connect(self.database)) as db, db:
                 interrupted = db.execute("SELECT document_id FROM documents WHERE status IN ('queued','processing')").fetchall()
                 db.execute("UPDATE documents SET status='failed', stage='failed', error_code='processing_interrupted', updated_at=? WHERE status IN ('queued','processing')", (self._now(),))
                 if self.lifecycle is not None:
@@ -279,7 +280,7 @@ class DocumentService:
                         self.lexical.replace_document(document_id, pdf[0].evidence)
                         self._published[document_id] = pdf
                         continue
-                    with closing(sqlite3.connect(self.database)) as db:
+                    with closing(sqlite_connect(self.database)) as db:
                         payload = db.execute('SELECT payload FROM document_artifacts WHERE document_id=?', (document_id,)).fetchone()
                     prepared = PreparedDocument(**json.loads(payload[0]))
                     index = self._build_index(prepared)
@@ -293,7 +294,7 @@ class DocumentService:
         """Cooperative cancellation; a late processor result can never publish."""
         with self._lock:
             self._stop.set()
-            with closing(sqlite3.connect(self.database)) as db, db:
+            with closing(sqlite_connect(self.database)) as db, db:
                 interrupted = db.execute("SELECT document_id FROM documents WHERE status IN ('queued','processing')").fetchall()
                 db.execute("UPDATE documents SET status='failed', stage='failed', error_code='processing_interrupted', updated_at=? WHERE status IN ('queued','processing')", (self._now(),))
                 if self.lifecycle is not None:
@@ -309,7 +310,7 @@ class DocumentService:
 
     def _fail(self, document_id, code):
         code = code if code in ERRORS else 'processing_failed'
-        with self._lock, closing(sqlite3.connect(self.database)) as db, db:
+        with self._lock, closing(sqlite_connect(self.database)) as db, db:
             db.execute("UPDATE documents SET status='failed', stage='failed', error_code=?, updated_at=? WHERE document_id=? AND status IN ('queued','processing','ready')",
                        (code, self._now(), document_id))
             db.execute("UPDATE document_trash SET previous_status='failed' WHERE document_id=?", (document_id,))
@@ -340,7 +341,7 @@ class DocumentService:
         with self._lock:
             if self._stop.is_set():
                 raise ProcessingFailure('processing_interrupted')
-            with closing(sqlite3.connect(self.database)) as db, db:
+            with closing(sqlite_connect(self.database)) as db, db:
                 changed = db.execute("UPDATE documents SET stage=?, updated_at=? WHERE document_id=? AND status='processing'", (stage, self._now(), document_id)).rowcount
                 if not changed:
                     raise ProcessingFailure('processing_interrupted')
@@ -358,7 +359,7 @@ class DocumentService:
                 with self._lock:
                     if self._stop.is_set():
                         continue
-                    with closing(sqlite3.connect(self.database)) as db, db:
+                    with closing(sqlite_connect(self.database)) as db, db:
                         changed = db.execute("UPDATE documents SET status='processing', stage='parsing', updated_at=? WHERE document_id=? AND status='queued'", (self._now(), document_id)).rowcount
                     if not changed:
                         continue
@@ -373,7 +374,7 @@ class DocumentService:
                     with self._lock:
                         if self._stop.is_set():
                             continue
-                        with closing(sqlite3.connect(self.database)) as db, db:
+                        with closing(sqlite_connect(self.database)) as db, db:
                             self._pdf.write(db, document_id, prepared)
                             self.lexical.replace_document(document_id, prepared.evidence, connection=db)
                             changed = db.execute("UPDATE documents SET status='ready', stage='ready', error_code=NULL, updated_at=? WHERE document_id=? AND status='processing'", (self._now(), document_id)).rowcount
@@ -390,7 +391,7 @@ class DocumentService:
                     with self._lock:
                         if self._stop.is_set():
                             continue
-                        with closing(sqlite3.connect(self.database)) as db, db:
+                        with closing(sqlite_connect(self.database)) as db, db:
                             changed = db.execute("UPDATE documents SET status='ready', stage='ready', error_code=NULL, updated_at=? WHERE document_id=? AND status='processing'", (self._now(), document_id)).rowcount
                             if changed and self.lifecycle is not None:
                                 self.lifecycle.document_ready(db, document_id)
@@ -406,7 +407,7 @@ class DocumentService:
                 with self._lock:
                     if self._stop.is_set():
                         continue
-                    with closing(sqlite3.connect(self.database)) as db, db:
+                    with closing(sqlite_connect(self.database)) as db, db:
                         db.execute('INSERT OR REPLACE INTO document_artifacts VALUES (?,?)', (document_id, payload))
                         changed = db.execute("UPDATE documents SET status='ready', stage='ready', error_code=NULL, updated_at=? WHERE document_id=? AND status='processing'", (self._now(), document_id)).rowcount
                         if not changed:
@@ -425,7 +426,7 @@ class DocumentService:
                 self._jobs.task_done()
 
     def retry(self, document_id):
-        with self._lock, closing(sqlite3.connect(self.database)) as db, db:
+        with self._lock, closing(sqlite_connect(self.database)) as db, db:
             if self._thread is None or self._stop.is_set():
                 raise DocumentError('processing_unavailable', 'Processing is not running.', 503, True)
             db.execute('BEGIN IMMEDIATE')
@@ -565,7 +566,7 @@ class DocumentService:
             # The original evidence and parser metadata still describe the published
             # vectors. Only the independent reading representation is supplemented.
             parsed['reading'] = reading
-            with closing(sqlite3.connect(self.database)) as db, db:
+            with closing(sqlite_connect(self.database)) as db, db:
                 db.execute('UPDATE document_parses SET payload=? WHERE document_id=?',
                            (json.dumps(parsed, allow_nan=False), document['document_id']))
         if budget is not None:
