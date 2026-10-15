@@ -4,7 +4,7 @@ import pytest
 from app.agent_protocol import DocumentVersion, ScopeSnapshot, TaskPackage, ExecutionBudget
 from app.questions import QuestionBudget
 from app.python_executor import ExecutionResult
-from app.csv_specialist import CsvSpecialist
+from app.csv_specialist import SCRIPT_PREAMBLE, CsvSpecialist
 
 
 class Model:
@@ -90,7 +90,7 @@ def test_script_failure_gets_one_repair_and_result_is_preserved():
     result = specialist.execute(task, QuestionBudget())
     assert result['result']['status'] == 'completed'
     assert len(executor.calls) == 2
-    assert executor.calls[1][0] == 'fixed()'
+    assert executor.calls[1][0] == SCRIPT_PREAMBLE + 'fixed()'
 
 
 def test_invalid_output_cannot_be_approved_by_model():

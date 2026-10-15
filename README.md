@@ -25,11 +25,11 @@ this checkout includes them; building only commit `4c05c32` does not. The normal
 application instance has not been upgraded; temporary validation instances were
 stopped. See [plan.md](plan.md) and [stage-g-log.md](stage-g-log.md) for exact scope.
 
-**SQLite / CSV worker update (2026-10-15, uncommitted):** unified SQLite busy
-timeout, WAL for `app.sqlite3`, and execution payloads moved out of the database
-into files. Not yet verified end to end with Docker and a real worker, and existing
-databases need an `execution_jobs` migration before CSV execution works. Details
-and known issues: [CHANGELOG.md](CHANGELOG.md).
+**SQLite / CSV worker update (2026-10-15):** unified SQLite busy timeout, WAL for
+`app.sqlite3`, execution payloads moved out of the database into short-lived files,
+and an automatic `execution_jobs` migration. Verified with a local backend, the real
+host worker and Gemini, but not yet with the Docker backend. Details and known
+issues: [CHANGELOG.md](CHANGELOG.md) and [problems-to-be-solved.md](problems-to-be-solved.md).
 
 ## 2. Architecture
 
@@ -107,9 +107,9 @@ sequenceDiagram
 - **Execution payloads:** generated scripts and CSV inputs (up to 64 MiB) are
   stored as `DATA_DIR/execution_payloads/<job_id>.json`, not in SQLite. Write
   transactions touch only small rows (`task_json`, lease, result), and the worker
-  reads the payload after its lease commits. Session/source purges delete payload
-  files. Startup removes files whose job row no longer exists. Permanent document
-  deletion removes the rows immediately, and the related files on the next startup.
+  reads the payload after its lease commits. A payload exists only while its
+  `execute()` call waits and is deleted on every exit path (result, timeout, stop,
+  source deletion). Startup clears anything left over from a crash.
 - **Recovery:** session history has no 24-hour expiry. The browser stores only the
   current session pointer and UI state. Interrupted conversation runs require
   explicit resume; durable receipts and stable identities prevent duplicate
@@ -254,11 +254,10 @@ Restart the host worker when its code/configuration changes. If a runner rebuild
 changes its image ID, update both backend configuration and the worker command.
 Saved runs retain their original behavior configuration and may require it to resume.
 
-Databases created before the 2026-10-15 SQLite update still have the old
-`execution_jobs.payload` column, and no automatic migration exists yet. Until one
-is added, back up the data directory and rebuild that table, which holds only
-transient job state. Otherwise CSV execution fails with `storage_unavailable`.
-See [CHANGELOG.md](CHANGELOG.md).
+Databases created before the 2026-10-15 SQLite update are migrated automatically
+on first start: `execution_jobs.payload` becomes `task_json`, finished results are
+kept as the reuse cache, and unfinished jobs are dropped. Back up the data directory
+before the first start. See [CHANGELOG.md](CHANGELOG.md).
 
 For a separate demo instance, use different project names, ports, runtime
 and worker directories, and tokens. Backup, migration and permission details:

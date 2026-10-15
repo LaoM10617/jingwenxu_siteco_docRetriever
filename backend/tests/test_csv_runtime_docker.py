@@ -103,3 +103,32 @@ print(json.dumps({'count':len(frame), 'first':frame.iloc[0].tolist(),
     assert result.cleaned_up and not list(jobs_dir.iterdir())
     assert result.value == {'count': 150, 'first': ['0000', '1.20'], 'last': ['0149', 'NA']}
     assert source.read_bytes() == before
+
+
+def test_auto_separator_scientific_notation_mean_and_tied_top_n(tmp_path):
+    value = execute(tmp_path, '''import json
+from decimal import Decimal
+import pandas as pd
+from siteco_analysis import decimals, exact_mean, top_n
+parsed = decimals(pd.Series(['7,41E-20', '1,43', '0', '']), missing='exclude')
+try:
+    decimals(pd.Series(['1,5', '2.5']))
+    mixed_rejected = False
+except ValueError:
+    mixed_rejected = True
+frame = pd.DataFrame({'k': list('abcde'), 'v': [Decimal(3), None, Decimal(2), Decimal(2), Decimal(1)]})
+best, diagnostic = top_n(frame, 'v', 2)
+try:
+    top_n(pd.DataFrame({'v': ['92', '618']}), 'v', 1)
+    text_rejected = False
+except ValueError:
+    text_rejected = True
+print(json.dumps({'text_rejected': text_rejected, 'threshold': str(decimals('100')), 'ints': [str(v) for v in decimals(pd.Series([100, Decimal(7)]))], 'parsed': [None if v is None else str(v) for v in parsed], 'mixed_rejected': mixed_rejected,
+    'mean': str(exact_mean([Decimal(1), Decimal(2), None])), 'top': list(best['k']), 'diagnostic': diagnostic}))
+''')
+    assert value['parsed'] == ['7.41E-20', '1.43', '0', None]
+    assert value['mixed_rejected']
+    assert value['mean'] == '1.5'
+    assert value['text_rejected'] and value['threshold'] == '100' and value['ints'] == ['100', '7']
+    assert value['top'] == ['a', 'c', 'd']
+    assert value['diagnostic']['excluded_missing'] == 1 and value['diagnostic']['ties_included'] == 1

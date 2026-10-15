@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +31,7 @@ def test_pull_execution_is_durable_and_replay_does_not_execute_twice(tmp_path):
         assert jobs.complete(claim['job_id'], claim['lease_token'], result)
         assert jobs.complete(claim['job_id'], claim['lease_token'], result)
         assert future.result(timeout=2).value == {'sum': 1}
+    assert not list((tmp_path / 'execution_payloads').iterdir())
     restarted = ExecutionJobs(database)
     assert restarted.claim('worker') is None
     assert restarted.execute(task, 'print(1)', {'a.csv': 'n\n1'}, QuestionBudget()).value == {'sum': 1}
@@ -137,3 +139,31 @@ def test_explicit_resume_reruns_cancelled_result(execution):
                 {'status': status, 'value': {} if status == 'completed' else None,
                  'seconds': {}, 'cleaned_up': True})
             assert future.result(timeout=2).status == status
+
+
+def test_legacy_inline_payload_table_keeps_only_finished_results(tmp_path):
+    database = tmp_path / 'app.sqlite3'
+    task = TaskPackage(session_id='s', turn_id='t', run_id='r', task_id='task',
+                       objective='sum', specialist='csv', scope=ScopeSnapshot(documents=()))
+    task_dict = task.model_dump(mode='json')
+    with sqlite3.connect(database) as db:
+        db.execute("CREATE TABLE conversation_runs(run_id TEXT PRIMARY KEY, stop_requested INTEGER, kind TEXT DEFAULT 'foreground')")
+        db.execute("INSERT INTO conversation_runs(run_id,stop_requested) VALUES ('r', 0)")
+        db.execute('''CREATE TABLE execution_jobs (job_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+            run_id TEXT NOT NULL REFERENCES conversation_runs(run_id) ON DELETE CASCADE,
+            task_id TEXT NOT NULL, request_hash TEXT NOT NULL, payload TEXT NOT NULL,
+            status TEXT NOT NULL, lease_token TEXT, worker_id TEXT, lease_until REAL,
+            result TEXT, created_at REAL NOT NULL)''')
+        payload = json.dumps({'task': task_dict, 'script': 'x', 'inputs': {}, 'image': None})
+        result = json.dumps({'status': 'completed', 'value': {'sum': 1}, 'seconds': {}, 'cleaned_up': True})
+        db.execute("INSERT INTO execution_jobs VALUES ('done','s','r','task','h',?,'completed',NULL,NULL,NULL,?,1)", (payload, result))
+        db.execute("INSERT INTO execution_jobs VALUES ('open','s','r','task','h',?,'leased','t','w',9,NULL,2)", (payload,))
+    (tmp_path / 'execution_payloads').mkdir()
+    (tmp_path / 'execution_payloads' / 'crash.json.tmp').write_text('{}')
+    ExecutionJobs(database)
+    ExecutionJobs(database)  # a second start must not migrate again
+    with sqlite3.connect(database) as db:
+        assert 'payload' not in {row[1] for row in db.execute('PRAGMA table_info(execution_jobs)')}
+        rows = db.execute('SELECT job_id,task_json,result FROM execution_jobs').fetchall()
+    assert [(job_id, json.loads(task_json), res) for job_id, task_json, res in rows] == [('done', task_dict, result)]
+    assert not list((tmp_path / 'execution_payloads').iterdir())

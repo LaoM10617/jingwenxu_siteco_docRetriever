@@ -6,6 +6,13 @@ import re
 
 
 def decimal_value(value, *, decimal_separator='.', thousands_separator=None, missing='reject'):
+    # Integers and Decimals are already exact; only floats (lossy) are refused.
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError('Nonfinite decimal')
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        return Decimal(value)
     if not isinstance(value, str):
         raise ValueError('Decimal conversion requires original string values')
     if decimal_separator not in ('.', ',') or thousands_separator not in (None, '.', ',', ' '):
@@ -23,8 +30,10 @@ def decimal_value(value, *, decimal_separator='.', thousands_separator=None, mis
     if thousands_separator:
         sep = re.escape(thousands_separator)
         integer = rf'(?:[0-9]+|[0-9]{{1,3}}(?:{sep}[0-9]{{3}})+)'
-    if not re.fullmatch(rf'[+-]?{integer}(?:{re.escape(decimal_separator)}[0-9]+)?', text):
-        raise ValueError('Numeric value does not match the declared separators')
+    # Scientific notation (e.g. Ökobaudat '7,41E-20') is exact in Decimal; the
+    # mantissa still has to match the declared separators.
+    if not re.fullmatch(rf'[+-]?{integer}(?:{re.escape(decimal_separator)}[0-9]+)?(?:[eE][+-]?[0-9]+)?', text):
+        raise ValueError(f'Numeric value {text[:40]!r} does not match the declared separators')
     if thousands_separator:
         text = text.replace(thousands_separator, '')
     try:
@@ -53,9 +62,64 @@ def load_artifacts(path='/inputs/artifacts.json'):
         columns=item['payload']['columns'], dtype=object) for item in artifacts}
 
 
-def decimals(series, *, decimal_separator='.', thousands_separator=None, missing='reject'):
+def infer_decimal_separator(series):
+    """The one separator a whole column uses; a column mixing both is ambiguous."""
+    values = [v for v in series if isinstance(v, str) and v.strip()]
+    comma, dot = any(',' in v for v in values), any('.' in v for v in values)
+    if comma and dot:
+        raise ValueError('Column contains both "." and ","; pass decimal_separator and thousands_separator explicitly')
+    return ',' if comma else '.'
+
+
+def decimals(series, *, decimal_separator='auto', thousands_separator=None, missing='reject'):
+    if isinstance(series, str):
+        # A single literal such as a threshold: decimals('100') or decimals('1,5').
+        if decimal_separator == 'auto':
+            decimal_separator = ',' if ',' in series and thousands_separator is None else '.'
+        return decimal_value(series, decimal_separator=decimal_separator,
+                             thousands_separator=thousands_separator, missing=missing)
+    if decimal_separator == 'auto':
+        if thousands_separator is not None:
+            raise ValueError('decimal_separator must be explicit when a thousands_separator is given')
+        decimal_separator = infer_decimal_separator(series)
     return series.map(lambda value: decimal_value(value, decimal_separator=decimal_separator,
         thousands_separator=thousands_separator, missing=missing))
+
+
+def exact_mean(values):
+    """Mean of Decimal values (None excluded, like exact_sum) at 34 significant digits."""
+    values = [v for v in values if v is not None]
+    if not values:
+        return None
+    total = exact_sum(values)
+    with localcontext() as context:
+        context.prec = 34
+        return total / len(values)
+
+
+def top_n(frame, column, n, *, ascending=False):
+    """First n rows by a Decimal/number column, keeping every row tied with the nth.
+
+    Missing values are excluded and counted, never sorted to an arbitrary end.
+    Returns (frame, diagnostic).
+    """
+    if not isinstance(n, int) or n < 1:
+        raise ValueError('n must be a positive integer')
+    present = frame[frame[column].notna()]
+    # Strings would sort as text ('92' > '618'); refuse rather than rank wrongly.
+    if any(isinstance(v, (str, bool)) or not isinstance(v, (Decimal, int, float)) and not hasattr(v, 'item')
+           for v in present[column]):
+        raise ValueError(f'top_n column {column!r} must hold numbers; convert with decimals() and keep counts as integers')
+    ordered = present.sort_values(column, ascending=ascending, kind='mergesort')
+    if len(ordered) > n:
+        boundary = ordered[column].iloc[n - 1]
+        cut = n
+        while cut < len(ordered) and ordered[column].iloc[cut] == boundary:
+            cut += 1
+        ordered = ordered.iloc[:cut]
+    return ordered, {'operation': 'top_n', 'column': column, 'n': n, 'ascending': ascending,
+                     'excluded_missing': int(len(frame) - len(present)),
+                     'ties_included': int(max(0, len(ordered) - n))}
 
 
 def exact_sum(values):

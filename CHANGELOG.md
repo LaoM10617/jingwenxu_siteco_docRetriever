@@ -1,6 +1,39 @@
 # 更新日志
 
-## 未提交：SQLite 并发与 CSV 执行任务存储（2026-10-15 整理）
+## 未提交：CSV 计算正确性与确定性数值工具（2026-10-15）
+
+对应 `problems-to-be-solved.md` 第 3、4 步（P8、P9、P10、P12 的主要部分）。目标：Ökobaudat 演示中均值、求和、排序、图表稳定且精确。
+
+- **沙箱工具**（`csv_runtime.py`，需重建 runner 镜像）：
+  - `decimals()` 默认 `decimal_separator='auto'`，按整列推断，列内同时出现 `.` 和 `,` 时报错；支持科学计数法（`7,41E-20`）；接受单个字符串、整数和 Decimal，浮点仍拒绝。
+  - 新增 `exact_mean()`（34 位有效数字）。
+  - 新增 `top_n()`：排除空值，保留边界并列，拒绝字符串，避免按文本排序；返回诊断。
+- **执行前处理**（`csv_specialist.py`）：
+  - 前置导入 `Decimal`、pandas 和全部辅助函数。
+  - 删除模型臆造的 `from <错误模块> import <辅助函数名>` 行。
+- **概览**：每列附整列数值格式 `numeric`（小数分隔符、是否含科学计数法、非数值个数）。
+- **提示词**：
+  - 统一用 `decimals` / `exact_sum` / `exact_mean` / `top_n`，禁止 float 和自写解析；计数保持整数；旧结果先转换再比较。
+  - 用户给出的筛选值精确匹配，不得扩展。
+  - unit 必须填写，无法确定时写明“单位未在数据中给出”。
+  - review 阶段逐项核对上述规则。
+- **回答格式**：表格下方确定性附加 `Filters / Grouped by / Aggregations / Assumptions / Unit / Source rows`，内容取自已记录的计划，不增加模型调用。
+- **测试**：全量 574 passed，3 failed（同前，本机有密钥所致）；Docker 运行时测试 5 passed（runner `sha256:4b314f0c…`）。
+- **真实验证**（本地后端 + host worker + Gemini，Ökobaudat，与 `truth.json` 比对）：第二轮 8 题 7 题正确（A1-A3 精确筛选、均值/最小/最大、一级分类均值 + 图表、科学计数法求和、最低 5 个、前 10 名含并列、分组求和 + 图表）。唯一失败的“在上一张表上筛选”修复后，连续两次 d3 → d4 均正确。
+- **部署**：`.env` 的 `EXECUTION_IMAGE` 已更新为 `sha256:4b314f0c…`（原文件备份在会话临时目录）。worker 启动命令也要使用这个镜像 ID；Docker 后端需重新构建。
+
+## 未提交：执行任务迁移、载荷生命周期、脚本前置导入（2026-10-15）
+
+对应 `problems-to-be-solved.md` 的 P1、P2/P3/P4/P13（不含去重）、P10。用户确认：迁移保留结果缓存；暂不做输入去重。
+
+- **迁移**（`execution_jobs.py`）：启动时检测旧的 `payload` 列，同一事务内重建表。有 `result` 的行保留，`task_json` 取自 `json_extract(payload,'$.task')`；未完成的行丢弃。
+- **载荷生命周期**：`execute()` 的 `finally` 在所有退出路径删除载荷文件；`claim()` 在租约提交后读不到文件时返回无任务；启动时清空 `execution_payloads/`（含 `*.json.tmp`）。删除会话、永久删除文档、任务被拒、命中缓存都不再留下文件。
+- **前置导入**（`csv_specialist.py`）：执行前在生成的脚本前加 `import pandas as pd` 与 `from siteco_analysis import …`，避免第一次执行出现 `NameError`。
+- **测试**：相关 6 个测试文件 74 passed（新增迁移测试；载荷删除断言；更新脚本断言）。迁移在 `data/docker-e2e/app.sqlite3` 的**副本**上验证：2 个未完成行被丢弃，`integrity_check` ok，原库未改。
+- **真实验证**（本地后端 + host worker + Gemini，Ökobaudat CSV，2 个问题）：A1-A3 按单位计数正确，只执行 1 次，每轮结束后载荷目录为空。GWP 统计问题失败：模型写了不存在的 `from decimals import decimals`，又未指定逗号小数分隔符，属于 P9/P11，本轮未处理。
+- **未做**：Docker 后端验证、全量 pytest、前端测试。
+
+## SQLite 并发与 CSV 执行任务存储（2026-10-15，提交 `4774fd4`）
 
 基线 `main` / `0660cc3`，以下改动均在工作区，**尚未 commit**。目标是消除 CSV
 计算期间的 SQLite 锁竞争：大体积脚本与 CSV 输入曾整块写入 `execution_jobs`

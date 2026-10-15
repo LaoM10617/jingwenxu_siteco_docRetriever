@@ -27,19 +27,28 @@ class ExecutionJobs:
         self._waiters = set()
         self._guard = Lock()
         with self._db() as db:
+            legacy = 'payload' in {row['name'] for row in db.execute('PRAGMA table_info(execution_jobs)')}
+            if legacy:
+                db.execute('ALTER TABLE execution_jobs RENAME TO execution_jobs_legacy')
             db.execute('''CREATE TABLE IF NOT EXISTS execution_jobs (
                 job_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
                 run_id TEXT NOT NULL REFERENCES conversation_runs(run_id) ON DELETE CASCADE,
                 task_id TEXT NOT NULL, request_hash TEXT NOT NULL, task_json TEXT NOT NULL,
                 status TEXT NOT NULL, lease_token TEXT, worker_id TEXT, lease_until REAL,
                 result TEXT, created_at REAL NOT NULL)''')
-            live = {row[0] for row in db.execute('SELECT job_id FROM execution_jobs')}
-        # Rows can disappear through raw-SQL deletes or an ON DELETE CASCADE that
-        # never touches the filesystem; sweep whatever they left behind here,
-        # once at startup, before any request can create a new file.
-        for path in self._payload_dir.glob('*.json'):
-            if path.stem not in live:
-                path.unlink(missing_ok=True)
+            if legacy:
+                # Finished rows are the reuse cache and keep their result. Unfinished
+                # rows are dropped: no execute() survives a restart, so nothing could
+                # ever claim them, and their inline scripts/inputs are not migrated.
+                db.execute('''INSERT INTO execution_jobs
+                    (job_id,session_id,run_id,task_id,request_hash,task_json,status,result,created_at)
+                    SELECT job_id,session_id,run_id,task_id,request_hash,json_extract(payload,'$.task'),
+                    status,result,created_at FROM execution_jobs_legacy WHERE result IS NOT NULL''')
+                db.execute('DROP TABLE execution_jobs_legacy')
+        # A payload lives only while its execute() call waits, and none can be
+        # waiting yet; anything here (including *.tmp) is left over from a crash.
+        for path in self._payload_dir.iterdir():
+            path.unlink(missing_ok=True)
 
     @contextmanager
     def _db(self, *, write=True):
@@ -164,6 +173,9 @@ class ExecutionJobs:
                 self._waiters.discard(job_id)
             with self._db() as db:
                 db.execute("UPDATE execution_jobs SET status='interrupted' WHERE job_id=? AND result IS NULL", (job_id,))
+            # Without a waiter the job can never be claimed again, so its script and
+            # inputs (a copy of the source data) are deleted on every exit path.
+            self._delete_payload(job_id)
 
     def claim(self, worker_id, image=None):
         if self.expected_image is not None and image != self.expected_image:
@@ -187,7 +199,12 @@ class ExecutionJobs:
         job_id, token = leased
         # Read the (possibly large) script/inputs after the lease commits and the
         # database lock is released, so this never holds up other writers.
-        payload = self._read_payload(job_id)
+        try:
+            payload = self._read_payload(job_id)
+        except FileNotFoundError:
+            # execute() ended between the lease commit and this read and removed
+            # the payload; the job is already interrupted, so there is nothing to run.
+            return None
         return {'job_id': job_id, 'lease_token': token,
                 'lease_seconds': self.lease_seconds, 'script': payload['script'],
                 'inputs': payload['inputs']}

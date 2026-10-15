@@ -27,8 +27,8 @@ def retry_purges(runs):
 def invalidate_source(db, version_id):
     """Called in permanent deletion's transaction, before removing original data.
 
-    Deletes rows only; the matching on-disk payload files become orphans that
-    the next ExecutionJobs startup sweep removes (see execution_jobs.py).
+    Deletes rows only; a matching on-disk payload is removed when its waiting
+    execute() call exits after seeing the source unavailable (see execution_jobs.py).
     """
     if not db.execute("SELECT 1 FROM sqlite_master WHERE name='conversation_runs'").fetchone():
         return

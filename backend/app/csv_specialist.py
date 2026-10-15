@@ -3,10 +3,12 @@
 Input identity and publication are outside generated code. Review improves semantic
 confidence; it is not a proof of arbitrary Python's mathematical correctness.
 """
+import ast
 from copy import deepcopy
 from hashlib import sha256
 import json
 import math
+import re
 import time
 from typing import Literal, TypedDict
 
@@ -78,11 +80,11 @@ constraints保留用户原始请求及澄清；其中明确指定的字段、筛
 返回符合 schema 的计划，用用户语言描述口径。业务字段、单位、数字/日期格式、关联键或分类含义不明确时 action=clarify，不猜。
 概览样例仅用于了解列，不代表总体。筛选/语义定位必须在完整数据上实现明确谓词；不能用样例代替统计总体。
 使用 pandas 完成查询、筛选、排序、分组、聚合及多表关联。所有数字结果必须来自执行，不能在脚本中写死答案。
-脚本通过 from siteco_analysis import load_tables, load_artifacts, decimals, exact_sum, merge, emit 读取受控输入。
+宿主已在脚本前预置 import pandas as pd 和 from siteco_analysis import load_tables, load_artifacts, decimals, exact_sum, exact_mean, top_n, merge, emit；不要从其他模块导入这些名字。
 load_tables() 返回 {version_id:DataFrame}，原值全是字符串，index是稳定source_row_id。保留编号前导零和NA等字面值。
 load_artifacts() 读取 /inputs/artifacts.json，返回 {artifact_id:DataFrame}，包含任务明确引用且来源和范围仍有效的完整旧结果（不是样例）。用户要求“在上次结果上继续筛选/排序/计算”时使用该表，不能用原始表替代上轮分组或聚合后的总体。旧结果中Decimal仍是字符串，其他JSON标量保留类型；必要时显式转换。新的计算必须action=compute并记录过滤和口径。
-金额使用 decimals(series, decimal_separator='.', thousands_separator=None, missing='reject') 转为 Decimal，missing仅reject/exclude/zero。
-金额求和用exact_sum(series)，分组金额求和用agg(exact_sum)，避免默认Decimal上下文精度舍入。乘除和平均需要显式精度/舍入口径。
+数值（金额、指标等）一律用 decimals(series, missing='reject'/'exclude'/'zero') 转为 Decimal。decimal_separator 默认 'auto' 按整列推断（概览中 numeric.decimal_separator 为整列实际格式），支持科学计数法如 7,41E-20；有千位分隔符时显式传 decimal_separator 和 thousands_separator。禁止自写数值解析、float()/astype(float)/pd.to_numeric，禁止用 try/except 把无法解析的值变成 None 或 0。
+求和用exact_sum(series)，分组求和用agg(exact_sum)；平均用exact_mean(series)，分组平均用agg(exact_mean)（34位有效数字）；最小/最大可对Decimal列直接min()/max()。排序取前/后N名用 frame, diag = top_n(frame, '列', n, ascending=False/True)：排除空值、保留边界并列，并把diag加入diagnostics；全量排序前先显式处理空值。结果中的Decimal直接emit（输出为精确字符串，图表可用），不要转float；计数保持整数，不要转字符串。旧结果（load_artifacts）中的数值是字符串，先用decimals()转换；比较阈值用 Decimal('100')。
 关联使用 merge(left,right,on='列名'或列名列表,cardinality='one_to_one'/'one_to_many'/'many_to_one'/'many_to_many',null_keys='reject'/'exclude'/'match',how='inner')，返回(frame,诊断)。先明确关联基数和空键政策。
 空分组键必须显式处理，数量/金额单位必须明确。不能静默dropna或将错误转换成零。确定性检查可追加到diagnostics，业务口径不得由自动修复决定。
 最后 emit(result_frame, chart=None, diagnostics=[...])。只stdout一个JSON，columns字符串列表、rows二维标量数组、chart规范或null、diagnostics对象列表。
@@ -90,9 +92,37 @@ load_artifacts() 读取 /inputs/artifacts.json，返回 {artifact_id:DataFrame}�
 只使用可用输入和pandas/标准库，不能安装包、访问网络或宿主。代码执行正确性仍需审查，不可声称全部已证明。
 简单改图且数据/计算口径不变可action=reuse_chart，引用提供的artifact_id；此时operations=['chart']，filters/group_by/aggregations/joins=[]，script=''。新筛选/分组/聚合必须compute，不能复用旧数值。
 计划operations、filters、group_by、aggregations、joins、null_policy、numeric_formats、unit、assumptions必须如实记录脚本口径。
+用户给出的筛选值（如“Modul 为 A1-A3”）按原文精确匹配，不得扩展为相似、组成或子集值（如 A1、A2、A3）；认为需要扩展时 action=clarify。
+unit 必须填写：取自数据中的单位列（如按 Bezugseinheit 分组/筛选时写明“每 1 m3”等）或列名中的单位；计数写“行数”；无法从数据确定时写“原始数值，单位未在数据中给出”，不得臆造。
+review 阶段逐项核对：筛选值是否与用户原文一致、是否用了float或自写解析、unit是否填写；有问题时 repair 或 clarify，不得 accept。
 product_identifiers 非空时是PDF已取证的精确产品标识。product_key_columns 为每张输入CSV指定明确的产品编号列(version_id,column)，不以相似列或样例猜测业务键。宿主将在完整原表精确匹配字符串并只向脚本交付匹配行；脚本不要再次猜测/转换编号。键含义不明确则clarify；不允许此时reuse_chart。无产品依赖时product_key_columns=[]。
 duplicate_product_policy 默认reject；仅当用户明确要求保留重复编号的所有匹配原始行时设置all_matches，此时不得去重或选取第一行。未找到精确标识仍须澄清，不用相似编号替代。
 '''
+
+
+HELPERS = ('load_tables', 'load_artifacts', 'decimals', 'exact_sum', 'exact_mean', 'top_n', 'merge', 'emit')
+SCRIPT_PREAMBLE = ('from decimal import Decimal\nimport pandas as pd\n'
+                   'from siteco_analysis import ' + ', '.join(HELPERS) + '\n')
+
+
+def strip_shadow_imports(script):
+    """Drop `from <wrong module> import <helper names>` lines the model invents.
+
+    The preamble already binds these names to the real helpers, so such a line can
+    only fail (ModuleNotFoundError) or shadow them. Anything else is left as is.
+    """
+    try:
+        tree = ast.parse(script)
+    except SyntaxError:
+        return script
+    drop = set()
+    for node in tree.body:
+        if (isinstance(node, ast.ImportFrom) and node.module != 'siteco_analysis'
+                and node.names and all(a.name in HELPERS and a.asname in (None, a.name) for a in node.names)):
+            drop.update(range(node.lineno, node.end_lineno + 1))
+    if not drop:
+        return script
+    return '\n'.join(line for number, line in enumerate(script.splitlines(), 1) if number not in drop)
 
 
 class _State(TypedDict, total=False):
@@ -171,6 +201,19 @@ def validate_table(value):
     return deepcopy(value)
 
 
+def method_notes(plan, tables):
+    notes = []
+    for label, key in (('Filters', 'filters'), ('Grouped by', 'group_by'),
+                       ('Aggregations', 'aggregations'), ('Assumptions', 'assumptions')):
+        items = [str(v) for v in plan.get(key) or []]
+        if items:
+            notes.append(f'{label}: ' + '; '.join(items))
+    if plan.get('unit'):
+        notes.append('Unit: ' + str(plan['unit']))
+    notes.append('Source rows: ' + ', '.join(f"{t['original_filename']} ({len(t['rows'])})" for t in tables))
+    return notes
+
+
 def _calculation_summary(value):
     """Describe prior semantics without replaying scripts or nested result history."""
     try:
@@ -187,6 +230,26 @@ def _calculation_summary(value):
     return result
 
 
+_NUMBER = re.compile(r'[+-]?[0-9]+(?:([.,])[0-9]+)?([eE][+-]?[0-9]+)?')
+
+
+def _numeric_profile(values):
+    """Exact whole-column number format, so plans pick the right decimals() call.
+
+    Only plain numbers without thousands separators are recognised; a column that
+    is not entirely numeric reports how many values are not.
+    """
+    present = [v.strip() for v in values if v.strip()]
+    matches = [_NUMBER.fullmatch(v) for v in present]
+    numeric = [m for m in matches if m]
+    if not numeric:
+        return {}
+    separators = {m.group(1) for m in numeric if m.group(1)}
+    return {'numeric': {'numeric_values': len(numeric), 'non_numeric_values': len(present) - len(numeric),
+                        'decimal_separator': ','.join(sorted(separators)) or None,
+                        'scientific_notation': any(m.group(2) for m in numeric)}}
+
+
 def csv_overview(tables):
     """Exact full-population profile; examples are explicitly bounded samples."""
     profiles = []
@@ -197,7 +260,8 @@ def csv_overview(tables):
             examples = list(dict.fromkeys(values))[:3]
             columns.append({'name': name, 'blank_count': sum(not v.strip() for v in values),
                 'distinct_count': len(set(values)), 'examples': [v[:200] for v in examples],
-                'examples_truncated': any(len(v) > 200 for v in examples)})
+                'examples_truncated': any(len(v) > 200 for v in examples),
+                **_numeric_profile(values)})
         profiles.append({'source': table['source'], 'original_filename': table['original_filename'],
             'row_count': len(table['rows']), 'columns': columns})
     return profiles
@@ -311,7 +375,9 @@ class CsvSpecialist:
                 table['chart'] = current['chart']
                 return {'execution': {'status': 'completed', 'value': table, 'seconds': {}, 'cleaned_up': True},
                         'attempts': 0}
-            result = self.executor.execute(task, current['script'],
+            # Generated scripts often omit these imports; a NameError would cost one
+            # execution and one review model call. Re-importing is harmless.
+            result = self.executor.execute(task, SCRIPT_PREAMBLE + strip_shadow_imports(current['script']),
                 {'datasets.json': json.dumps(state['tables'], ensure_ascii=False),
                  'artifacts.json': json.dumps([{'artifact_id': a['artifact_id'],
                     'version_id': a.get('version_id', '1'), 'unit': a['unit'],
@@ -455,6 +521,9 @@ class CsvSpecialist:
             lines += ['| ' + ' | '.join(map(escape, row)) + ' |' for row in table['rows'][:30]]
             if len(table['rows']) > 30:
                 lines.append(f'\nShowing 30 of {len(table["rows"])} result rows; the artifact contains the complete result.')
+            # The plan already records the method; showing it lets the user catch a
+            # misread filter (e.g. "A1-A3" widened to A1/A2/A3) without a model call.
+            lines += [''] + method_notes(plan, state['tables'])
             findings.append(Finding(text='\n'.join(lines), artifact_ids=(identity,)))
             calculations.append({'calculation_id': identity, 'operation': {'tool': 'isolated_python'},
                                  'result': {'artifact_id': identity, 'row_count': len(table['rows'])}})
