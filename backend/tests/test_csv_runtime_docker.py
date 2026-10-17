@@ -123,12 +123,13 @@ try:
     text_rejected = False
 except ValueError:
     text_rejected = True
-print(json.dumps({'text_rejected': text_rejected, 'threshold': str(decimals('100')), 'ints': [str(v) for v in decimals(pd.Series([100, Decimal(7)]))], 'parsed': [None if v is None else str(v) for v in parsed], 'mixed_rejected': mixed_rejected,
+print(json.dumps({'text_rejected': text_rejected, 'threshold': str(decimals('100')), 'empty_thousands': str(decimals(pd.Series(['1,5']), thousands_separator='')[0]), 'ints': [str(v) for v in decimals(pd.Series([100, Decimal(7)]))], 'parsed': [None if v is None else str(v) for v in parsed], 'mixed_rejected': mixed_rejected,
     'mean': str(exact_mean([Decimal(1), Decimal(2), None])), 'top': list(best['k']), 'diagnostic': diagnostic}))
 ''')
     assert value['parsed'] == ['7.41E-20', '1.43', '0', None]
     assert value['mixed_rejected']
     assert value['mean'] == '1.5'
     assert value['text_rejected'] and value['threshold'] == '100' and value['ints'] == ['100', '7']
+    assert value['empty_thousands'] == '1.5'
     assert value['top'] == ['a', 'c', 'd']
     assert value['diagnostic']['excluded_missing'] == 1 and value['diagnostic']['ties_included'] == 1

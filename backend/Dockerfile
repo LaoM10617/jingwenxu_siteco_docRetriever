@@ -28,6 +28,9 @@ RUN python -m pytest -q -p no:cacheprovider
 
 FROM dependencies AS runtime
 COPY backend/app /app/backend/app
+# Set by scripts/siteco.py; declared last so a new value only rebuilds this layer.
+ARG BUILD_FINGERPRINT=dev
+ENV BUILD_FINGERPRINT=$BUILD_FINGERPRINT
 USER 10001:10001
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \

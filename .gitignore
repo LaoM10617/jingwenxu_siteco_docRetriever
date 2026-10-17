@@ -59,3 +59,8 @@ Desktop.ini
 !/eval/results/m50/
 /eval/results/m50/*
 !/eval/results/m50/run-20260927-ab-01/
+
+# Local editor settings and non-public test material
+/.vscode/
+/test_data/Fragen.txt
+/test_data/ZM-I/

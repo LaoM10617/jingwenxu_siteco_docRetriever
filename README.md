@@ -16,20 +16,13 @@ a LangGraph conversation agent, PDF/CSV specialist graphs and isolated Python
 computation. The existing UI supports chat, citations, tables, charts and recovery;
 the visual redesign and independent developer interface are future work.
 
-**Current status (2026-10-14):** G background exploration is implemented in the
-working tree. Cross-platform regression, real-provider probes, browser smoke
-testing and final code review have recorded results; the review fix has targeted
-regression coverage. Documentation/interface handoff is available; the final
-delivery summary remains the next step. G changes are not committed. Building
-this checkout includes them; building only commit `4c05c32` does not. The normal
-application instance has not been upgraded; temporary validation instances were
-stopped. See [plan.md](plan.md) and [stage-g-log.md](stage-g-log.md) for exact scope.
-
-**SQLite / CSV worker update (2026-10-15):** unified SQLite busy timeout, WAL for
-`app.sqlite3`, execution payloads moved out of the database into short-lived files,
-and an automatic `execution_jobs` migration. Verified with a local backend, the real
-host worker and Gemini, but not yet with the Docker backend. Details and known
-issues: [CHANGELOG.md](CHANGELOG.md) and [problems-to-be-solved.md](problems-to-be-solved.md).
+**Current status (2026-10-17):** the agent backend (stages A–G, including background
+CSV exploration) is complete and in maintenance. Later updates added a shared SQLite
+connection policy with WAL, file-backed execution payloads and deterministic CSV
+numeric helpers. The Docker frontend/backend, the CSV runner image and the host
+worker now start through one launcher that also checks versions (`scripts/siteco.py`,
+see [section 3](#3-run-the-application)). The UI redesign and a dedicated developer
+interface are still to come.
 
 ## 2. Architecture
 
@@ -122,9 +115,9 @@ sequenceDiagram
   has been added yet.
 
 This is a single-user local application with one backend process. Session
-boundaries are not multi-user authentication. Architecture decisions:
-[decisions-design.md](decisions-design.md). API contracts and examples:
-[ui-developer-handoff.md](ui-developer-handoff.md).
+boundaries are not multi-user authentication. HTTP routes and their request models
+are in `backend/app/*_api.py`; agent task/result contracts are in
+`backend/app/agent_protocol.py`.
 
 ## 3. Run the application
 
@@ -165,14 +158,42 @@ Edit `.env` locally. Environment variables override its values.
 Keep credentials out of frontend variables, source control and shared logs. Use
 `docker compose config --quiet` for validation; ordinary `config` output can
 expand secrets. Missing credentials permit startup but do not enable provider
-calls. The worker reads its token from its environment, **not from `.env`**.
+calls. The worker reads its token from its environment, **not from `.env`**;
+the launcher below injects it into the worker process only.
+
+### Recommended: one launcher for Docker app, runner and worker
+
+After the prerequisites and `.env` above (including `EXECUTION_WORKER_TOKEN` and
+an existing `HOST_DATA_DIR`), use one command for first start and every update:
+
+```powershell
+.venv/Scripts/python.exe scripts/siteco.py up       # build changes, start, verify, start worker
+.venv/Scripts/python.exe scripts/siteco.py status   # versions, runner/.env match, worker state
+.venv/Scripts/python.exe scripts/siteco.py logs     # container logs and worker log
+.venv/Scripts/python.exe scripts/siteco.py down     # stop worker, then containers
+.venv/Scripts/python.exe scripts/siteco.py check    # run the CI checks locally before pushing
+```
+
+`up` rebuilds the runner (writing its image ID to `.env`), rebuilds and recreates
+the containers, prepares the tokenizer on first start, and fails unless the running
+backend/frontend report the fingerprint of the current source. The worker runs in the
+background (`data/demo-worker`, log `data/launcher/worker.log`) and is replaced only
+when its code, runner image, token or backend port changed. Before anything that
+would interrupt a running CSV computation, `up`/`down` wait up to `--wait` seconds
+(default 300); `--force` interrupts it instead (the question can be resumed).
+Close any worker started by hand first; the launcher refuses to run beside it.
+The manual steps below remain the reference for troubleshooting and Option B.
 
 ### Build the CSV runner (both startup options)
 
 ```powershell
-docker build -t siteco-csv-runner:local -f runner/Dockerfile .
+docker build --provenance=false -t siteco-csv-runner:local -f runner/Dockerfile .
 docker image inspect --format '{{.Id}}' siteco-csv-runner:local
 ```
+
+`--provenance=false` keeps the image ID stable for unchanged sources; with the
+default attestation every build gets a new ID and the previously pinned one is
+removed when the tag moves.
 
 Set `.env`'s `EXECUTION_IMAGE` to the full printed ID and configure
 `EXECUTION_WORKER_TOKEN`. Use the same image ID and token for the worker.
@@ -242,27 +263,52 @@ simultaneously. If `DATA_DIR` changes, prepare its `tokenizers` subdirectory.
 
 ### Updating an existing Docker instance
 
-Application source is copied into images. `docker compose restart` does **not**
-load updated source. After checking the target instance/configuration and backing
-up its data, rebuild and recreate the services:
-
-```powershell
-docker compose up -d --build --wait --wait-timeout 60
-```
-
-Restart the host worker when its code/configuration changes. If a runner rebuild
-changes its image ID, update both backend configuration and the worker command.
-Saved runs retain their original behavior configuration and may require it to resume.
+Application source is copied into images, so `docker compose restart` does **not**
+load updated source. `scripts/siteco.py up` handles updates: it rebuilds the images
+and recreates the containers, keeps the runner image ID consistent across `.env`,
+the backend and the worker, and replaces the worker when needed. If you update by
+hand, run `docker compose up -d --build --wait`. Restart the worker whenever its
+code or configuration changes. When the runner image ID changes, update the backend
+configuration and the worker command together. Saved runs keep the configuration
+they started with, and resuming one may require that configuration.
 
 Databases created before the 2026-10-15 SQLite update are migrated automatically
 on first start: `execution_jobs.payload` becomes `task_json`, finished results are
 kept as the reuse cache, and unfinished jobs are dropped. Back up the data directory
-before the first start. See [CHANGELOG.md](CHANGELOG.md).
+before the first start.
 
-For a separate demo instance, use different project names, ports, runtime
-and worker directories, and tokens. Backup, migration and permission details:
-[deployment.md](deployment.md). A healthy container proves service availability,
-not end-to-end model or calculation correctness.
+For a separate demo instance, use a different project name, ports, runtime
+directory, worker directory and token. The launcher manages only the instance
+configured in `.env`; it always uses the worker directory `data/demo-worker`. A
+healthy container shows that the service is up, not that model answers or
+calculations are correct.
+
+### Data, backup and restore
+
+| Path | Content |
+| --- | --- |
+| `HOST_DATA_DIR/uploads/` | Original documents |
+| `HOST_DATA_DIR/app.sqlite3` | Authoritative business state: documents, sessions, messages, artifacts, receipts, execution jobs, exploration |
+| `HOST_DATA_DIR/conversation-checkpoints.sqlite3` | LangGraph checkpoints. They are not a substitute for the business database and cannot be restored on their own |
+| `HOST_DATA_DIR/tokenizers/` | Public tokenizer, which can be prepared again |
+| worker directory (`data/demo-worker`) | Worker identity, delivery receipts and temporary job inputs. Exclusive to one instance; contains user data |
+
+Back up cold and as a whole directory, so the two databases come from the same
+point in time:
+
+1. Let running questions finish, then stop everything with `scripts/siteco.py down`.
+2. Copy the complete runtime directory, including the SQLite `-wal`/`-shm` files,
+   and the worker directory. Record the source commit and the runner image ID.
+   Back up secrets separately, and protect the backup like the original data.
+3. Check the copies: original documents should have unchanged SHA-256 hashes, and
+   `PRAGMA integrity_check` should pass on both databases.
+4. Restore into a new directory and point `HOST_DATA_DIR` at it. Never run the
+   original instance and a clone with the same worker identity at the same time.
+   To resume old runs, move the original runner image with `docker image save` /
+   `docker image load`; a rebuild is not guaranteed to produce the same ID.
+
+Rolling back requires the matching code, images and a data snapshot taken before
+the upgrade. Switching back to old images alone is not enough.
 
 ## 4. Features, manual testing and current limits
 
@@ -288,7 +334,7 @@ Background exploration controls/results and developer observations are API-only:
 for new imports and may make bounded model calls. Disable it per session with
 `PUT /api/sessions/{sid}/explorations/settings` and `{"enabled":false}`. Existing
 materials on startup receive an overview without automatic paid continuation.
-See [API examples](ui-developer-handoff.md).
+Routes: `backend/app/exploration_api.py`.
 
 Current boundaries:
 
@@ -302,8 +348,7 @@ Current boundaries:
 - Model planning, summaries and review do not prove arbitrary semantic correctness.
   Ambiguous joins/fields/formats require clarification. No silent provider fallback.
 - Exploration controls and developer observations remain API-only. UI redesign
-  and a dedicated developer mode are not implemented; handoff contracts and real
-  examples are in [ui-developer-handoff.md](ui-developer-handoff.md).
+  and a dedicated developer mode are not implemented yet.
 
 **Tokenizer troubleshooting:** `voyage-4-tokenizer.json` must be under the active
 `DATA_DIR/tokenizers`. Local `DATA_DIR` and Docker `HOST_DATA_DIR` identify different
@@ -330,11 +375,23 @@ rerun after it. The smoke used five generation calls and two CSV execution
 attempts (first script failed, bounded repair succeeded). A browser assertion
 was corrected and the same saved session reused without repeating paid answers.
 These are scoped checks, not proof of arbitrary model/code correctness or a
-deployment of the normal instance. Exact commands and receipts: [G log](stage-g-log.md).
+deployment of the normal instance. Detailed receipts are kept outside the repository.
 
-F real-provider validation remains a cross-fix resumed session. Historical
-partial answers remain partial; it was not a clean final-code run from an empty
-database. Preserve those qualifications when reusing [F evidence](stage-f-log.md).
+F real-provider validation was a session resumed across fixes. Partial answers from
+that run remain partial, and it was not a clean run of the final code from an empty
+database.
+
+**Continuous integration** (`.github/workflows/ci.yml`) runs on every push to
+`main` and on every pull request. It uses no secrets, so it makes no real model or
+embedding calls and runs no paid probes. It has four jobs:
+
+- the full backend pytest suite, including the Docker isolation tests against a
+  freshly built runner image;
+- the frontend type check and build;
+- a Compose configuration check and image builds;
+- the launcher tests plus a locked-dependency install on Windows.
+
+`scripts/siteco.py check` runs the same checks locally, apart from the Windows job.
 
 Run backend tests after installing the development lock file:
 
@@ -394,13 +451,8 @@ materials and your own Gemini/Voyage keys. Commands and configuration:
 | `backend/app/generation.py`, `config.py`, `runtime_*.py` | Model adapters and configuration |
 | `frontend/src/` | React chat, settings, result and source previews |
 | `backend/tests/`, `frontend/tests/`, `tests/` | Backend, browser and tracing tests |
-| `scripts/` | Host worker launcher, tokenizer preparation and stage probes |
+| `scripts/siteco.py` | Launcher for Docker app, runner image and host worker (`up/down/status/logs`) |
+| `scripts/` (other) | Host worker entry point, tokenizer preparation and stage probes |
 | `test_data/`, `assets/`, `siteco_demo.mp4` | Sample documents, screenshots and original demo |
 | `eval/` | Historical evaluation protocols, results and scoring scripts |
 | `compose.yaml`, `.env.example` | Deployment and configuration template |
-
-Architecture decisions: [decisions-design.md](decisions-design.md). Execution plan
-and stage evidence: [plan.md](plan.md). Uncommitted change log:
-[CHANGELOG.md](CHANGELOG.md). Deployment and data migration:
-[deployment.md](deployment.md). Next UI/developer implementation entry points:
-[ui-developer-handoff.md](ui-developer-handoff.md).

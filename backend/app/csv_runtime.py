@@ -6,6 +6,8 @@ import re
 
 
 def decimal_value(value, *, decimal_separator='.', thousands_separator=None, missing='reject'):
+    if thousands_separator == '':
+        thousands_separator = None  # '' is a common way of saying "none"
     # Integers and Decimals are already exact; only floats (lossy) are refused.
     if isinstance(value, Decimal):
         if not value.is_finite():
@@ -72,6 +74,8 @@ def infer_decimal_separator(series):
 
 
 def decimals(series, *, decimal_separator='auto', thousands_separator=None, missing='reject'):
+    if thousands_separator == '':
+        thousands_separator = None
     if isinstance(series, str):
         # A single literal such as a threshold: decimals('100') or decimals('1,5').
         if decimal_separator == 'auto':

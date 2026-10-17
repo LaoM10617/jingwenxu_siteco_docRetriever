@@ -1,8 +1,10 @@
 # CSV execution worker
 
-For fresh-instance setup, tokenizer preparation, secrets, and consistent migration /
-backup of the backend and worker stores, see [deployment.md](../deployment.md).
-The worker is a separate host process; `docker compose up` alone does not start it.
+For setting up a fresh instance, preparing the tokenizer, configuring secrets, and
+backing up or restoring the backend and worker stores, see the
+[main README](../README.md#3-run-the-application). The worker is a separate host
+process: `docker compose up` alone does not start it, while `scripts/siteco.py up`
+starts and manages it.
 
 Build the Linux/amd64 pandas runner from the repository root:
 

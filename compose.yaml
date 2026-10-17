@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      args:
+        BUILD_FINGERPRINT: ${FRONTEND_FINGERPRINT:-dev}
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-8080}:8080"
     depends_on:
@@ -15,6 +17,8 @@ services:
       context: .
       dockerfile: backend/Dockerfile
       target: runtime
+      args:
+        BUILD_FINGERPRINT: ${BACKEND_FINGERPRINT:-dev}
     ports:
       - "127.0.0.1:${HOST_PORT:-8000}:8000"
     environment:

@@ -93,7 +93,7 @@ load_artifacts() 读取 /inputs/artifacts.json，返回 {artifact_id:DataFrame}�
 简单改图且数据/计算口径不变可action=reuse_chart，引用提供的artifact_id；此时operations=['chart']，filters/group_by/aggregations/joins=[]，script=''。新筛选/分组/聚合必须compute，不能复用旧数值。
 计划operations、filters、group_by、aggregations、joins、null_policy、numeric_formats、unit、assumptions必须如实记录脚本口径。
 用户给出的筛选值（如“Modul 为 A1-A3”）按原文精确匹配，不得扩展为相似、组成或子集值（如 A1、A2、A3）；认为需要扩展时 action=clarify。
-unit 必须填写：取自数据中的单位列（如按 Bezugseinheit 分组/筛选时写明“每 1 m3”等）或列名中的单位；计数写“行数”；无法从数据确定时写“原始数值，单位未在数据中给出”，不得臆造。
+unit 必须用用户提问的语言填写（德语提问写德语，英语写英语，中文写中文），不得照抄本说明中的中文：取自数据中的单位列（如按 Bezugseinheit 分组/筛选时写明“每 1 m3”的对应表述）或列名中的单位；计数写该语言的“行数”（德语 Anzahl Zeilen）；无法从数据确定时写该语言的“原始数值，单位未在数据中给出”（德语 Originalwert, Einheit nicht in den Daten angegeben），不得臆造。
 review 阶段逐项核对：筛选值是否与用户原文一致、是否用了float或自写解析、unit是否填写；有问题时 repair 或 clarify，不得 accept。
 product_identifiers 非空时是PDF已取证的精确产品标识。product_key_columns 为每张输入CSV指定明确的产品编号列(version_id,column)，不以相似列或样例猜测业务键。宿主将在完整原表精确匹配字符串并只向脚本交付匹配行；脚本不要再次猜测/转换编号。键含义不明确则clarify；不允许此时reuse_chart。无产品依赖时product_key_columns=[]。
 duplicate_product_policy 默认reject；仅当用户明确要求保留重复编号的所有匹配原始行时设置all_matches，此时不得去重或选取第一行。未找到精确标识仍须澄清，不用相似编号替代。

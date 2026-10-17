@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager, closing
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
+import os
 import sqlite3
 import tempfile
 import logging
@@ -155,6 +156,7 @@ def create_app(settings: Settings | None = None, *, processor=None, model=None) 
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
-        return {"status": "ok", "version": VERSION}
+        # The launcher compares this with its source fingerprint to detect stale images.
+        return {"status": "ok", "version": VERSION, "build": os.environ.get("BUILD_FINGERPRINT", "dev")}
 
     return app

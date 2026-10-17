@@ -9,6 +9,9 @@ RUN npm run build
 FROM nginx:stable-alpine@sha256:985220252f3863977e468f611ef118ebd01421289dd86ee1ae99cb068c3bce2b AS runtime
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
+# Set by scripts/siteco.py so it can verify the served bundle matches the source.
+ARG BUILD_FINGERPRINT=dev
+RUN printf '{"build":"%s"}\n' "$BUILD_FINGERPRINT" > /usr/share/nginx/html/version.json
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
     CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1

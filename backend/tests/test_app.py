@@ -21,8 +21,9 @@ def test_health_without_keys_or_network(tmp_path, monkeypatch):
             return original_connect(sock, address)
         pytest.fail("Startup and health must not contact external services")
     monkeypatch.setattr(socket.socket, "connect", reject_network)
+    monkeypatch.delenv("BUILD_FINGERPRINT", raising=False)
     with TestClient(create_app(settings_for(tmp_path / "runtime"))) as client:
-        assert client.get("/api/health").json() == {"status": "ok", "version": "0.1.0"}
+        assert client.get("/api/health").json() == {"status": "ok", "version": "0.1.0", "build": "dev"}
         assert client.get("/api/health").status_code == 200
         assert client.post("/api/documents").status_code == 422
 
@@ -84,6 +85,6 @@ def test_health_does_not_expose_configuration(tmp_path):
     configuration.gemini_api_key = "fixture-secret"
     with TestClient(create_app(configuration)) as client:
         response = client.get("/api/health")
-        assert set(response.json()) == {"status", "version"}
+        assert set(response.json()) == {"status", "version", "build"}
         assert "fixture-secret" not in response.text
         assert str(tmp_path) not in response.text
