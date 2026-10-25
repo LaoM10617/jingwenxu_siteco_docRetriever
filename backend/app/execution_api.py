@@ -2,6 +2,7 @@
 from hmac import compare_digest
 import math
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -53,6 +54,18 @@ class Completion(LeaseRequest):
     result: Result
 
 
+class TimingReport(LeaseRequest):
+    report_id: str = Field(min_length=36, max_length=36)
+    seconds: dict[Literal['host_completion_report'], float] = Field(min_length=1, max_length=1)
+
+    @model_validator(mode='after')
+    def valid_timing(self):
+        UUID(self.report_id)
+        if any(not math.isfinite(v) or v < 0 for v in self.seconds.values()):
+            raise ValueError('Invalid timing')
+        return self
+
+
 @router.post('/claim')
 def claim(body: WorkerRequest, jobs=Depends(authorized)):
     return {'job': jobs.claim(body.worker_id, body.image)}
@@ -70,3 +83,9 @@ def complete(job_id: str, body: Completion, jobs=Depends(authorized)):
     except ValueError:
         raise HTTPException(422, 'Invalid execution result') from None
     return {'accepted': accepted}
+
+
+@router.post('/{job_id}/timings')
+def timings(job_id: str, body: TimingReport, jobs=Depends(authorized)):
+    return {'accepted': jobs.record_worker_timing(
+        job_id, body.lease_token, body.report_id, body.seconds)}

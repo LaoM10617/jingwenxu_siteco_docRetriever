@@ -11,6 +11,7 @@ import math
 import re
 import time
 from typing import Literal, TypedDict
+from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -18,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from app.agent_protocol import (ArtifactDescriptor, Coverage, Finding, ScopeSnapshot,
                                 TaskPackage, TaskResult, validate_result)
 from app.documents import DocumentError
+from app.timing import capture, span, timed
 
 
 class _Schema(BaseModel):
@@ -272,6 +274,15 @@ class CsvSpecialist:
         self.answers, self.executor, self.artifacts = answer_service, executor, artifacts
 
     def execute(self, task: TaskPackage, budget):
+        with capture(task.run_id, turn_id=task.turn_id) as recorder:
+            first = len(recorder.entries)
+            with span('csv.total', task_id=task.task_id) as event:
+                output = self._execute(task, budget)
+                event.status = output['result']['status']
+            output['diagnostics']['timings'] = recorder.entries[first:]
+            return output
+
+    def _execute(self, task: TaskPackage, budget):
         budget = _Budget(budget, task.budget)
         documents = self.answers.tools.documents
         dependency_sources = tuple(dict.fromkeys(ref for scope in task.scope.dependency_scopes
@@ -297,18 +308,23 @@ class CsvSpecialist:
                 return schema.model_validate(raw).model_dump(mode='json')
             except ValidationError as exc:
                 raise DocumentError('invalid_csv_plan', 'CSV planning returned an invalid structure.', 502) from exc
+        @timed('csv.prepare')
         def overview(state):
             budget.step()
             if task.specialist != 'csv' or not task.scope.documents:
                 raise DocumentError('invalid_csv_task', 'CSV analysis requires CSV sources.', 422)
-            tables = documents.csv_snapshot(task.session_id, task.scope.documents)
-            profiles = csv_overview(tables)
+            with span('csv.snapshot', task_id=task.task_id) as event:
+                tables = documents.csv_snapshot(task.session_id, task.scope.documents)
+                event.row_count = sum(len(table['rows']) for table in tables)
+            with span('csv.overview', task_id=task.task_id):
+                profiles = csv_overview(tables)
             reusable = []
             if task.input_artifacts and self.artifacts is None:
                 raise DocumentError('artifact_not_reusable', 'Referenced CSV results are not available.', 409)
             if self.artifacts:
                 for identity in task.input_artifacts:
-                    item = self.artifacts.get(task.session_id, identity)
+                    with span('csv.reusable_read', task_id=task.task_id):
+                        item = self.artifacts.get(task.session_id, identity)
                     previous = ScopeSnapshot.model_validate_json(json.dumps(item['scope']))
                     if item['kind'] != 'table':
                         raise DocumentError('artifact_not_reusable',
@@ -322,6 +338,7 @@ class CsvSpecialist:
                             'The referenced result is unavailable or does not match the current source scope.', 409)
                     reusable.append(item)
             return {'tables': tables, 'overview': profiles, 'reusable': reusable, 'attempts': 0}
+        @timed('csv.plan')
         def plan(state):
             budget.step()
             prior = [{'artifact_id': a['artifact_id'], 'kind': a['kind'],
@@ -363,6 +380,7 @@ class CsvSpecialist:
             if reason:
                 return {'plan': {**current, 'action': 'clarify', 'clarification': reason}}
             return {'plan': current, 'tables': selected, 'product_mapping': mapping}
+        @timed('csv.build_execute')
         def build_execute(state):
             budget.step()
             available()
@@ -377,12 +395,18 @@ class CsvSpecialist:
                         'attempts': 0}
             # Generated scripts often omit these imports; a NameError would cost one
             # execution and one review model call. Re-importing is harmless.
-            result = self.executor.execute(task, SCRIPT_PREAMBLE + strip_shadow_imports(current['script']),
-                {'datasets.json': json.dumps(state['tables'], ensure_ascii=False),
-                 'artifacts.json': json.dumps([{'artifact_id': a['artifact_id'],
-                    'version_id': a.get('version_id', '1'), 'unit': a['unit'],
-                    'payload': {key: a['payload'][key] for key in ('columns', 'rows')}}
-                    for a in state['reusable']], ensure_ascii=False)}, budget)
+            with span('csv.execute_attempt', task_id=task.task_id, attempt_id=str(uuid4())) as attempt:
+                with span('csv.input_json', task_id=task.task_id) as event:
+                    inputs = {'datasets.json': json.dumps(state['tables'], ensure_ascii=False),
+                        'artifacts.json': json.dumps([{'artifact_id': a['artifact_id'],
+                            'version_id': a.get('version_id', '1'), 'unit': a['unit'],
+                            'payload': {key: a['payload'][key] for key in ('columns', 'rows')}}
+                            for a in state['reusable']], ensure_ascii=False)}
+                    event.input_bytes = sum(len(value.encode('utf-8')) for value in inputs.values())
+                    event.row_count = sum(len(table['rows']) for table in state['tables'])
+                result = self.executor.execute(task, SCRIPT_PREAMBLE + strip_shadow_imports(current['script']),
+                    inputs, budget)
+                attempt.status = result.status
             available()
             if result.status in ('cancelled', 'timed_out', 'interrupted') or not result.cleaned_up:
                 raise DocumentError('csv_execution_interrupted', 'CSV execution stopped or could not be cleaned up.', 409)
@@ -390,17 +414,20 @@ class CsvSpecialist:
                 'seconds': result.seconds, 'cleaned_up': result.cleaned_up, 'diagnostic': result.diagnostic},
                 'attempts': state['attempts'] + 1}
         def check(state):
-            budget.step()
-            execution = state['execution']
-            if execution['status'] != 'completed':
-                return {'error': execution.get('diagnostic') or execution['status']}
-            try:
-                table = validate_table(execution['value'])
-                if table['chart'] is None and state['plan']['chart'] is not None:
-                    table = validate_table({**table, 'chart': state['plan']['chart']})
-                return {'table': table, 'error': None}
-            except (ValueError, ValidationError, TypeError) as exc:
-                return {'error': str(exc)}
+            with span('csv.check', task_id=task.task_id) as event:
+                budget.step()
+                execution = state['execution']
+                if execution['status'] != 'completed':
+                    event.status = 'failed'
+                    return {'error': execution.get('diagnostic') or execution['status']}
+                try:
+                    table = validate_table(execution['value'])
+                    if table['chart'] is None and state['plan']['chart'] is not None:
+                        table = validate_table({**table, 'chart': state['plan']['chart']})
+                    return {'table': table, 'error': None}
+                except (ValueError, ValidationError, TypeError) as exc:
+                    event.status = 'failed'
+                    return {'error': str(exc)}
         def route_check(state):
             if state.get('error'):
                 return 'review' if state['attempts'] < 2 else 'collect'
@@ -408,6 +435,7 @@ class CsvSpecialist:
             needs_review = bool(p['joins'] or len(p['aggregations']) > 1 or p['group_by'] or
                 not table['rows'] or table['diagnostics'])
             return 'review' if needs_review and state.get('reviewed_attempt') != state['attempts'] else 'collect'
+        @timed('csv.review')
         def review(state):
             budget.step()
             payload = {'plan': state['plan'], 'overview': state['overview'],
@@ -441,6 +469,7 @@ class CsvSpecialist:
             return 'build_execute' if (state['plan']['action'] == 'compute'
                 and state['review']['decision'] == 'repair' and state['attempts'] < 2
                 and state['review']['script'].strip()) else 'collect'
+        @timed('csv.collect')
         def collect(state):
             budget.step()
             available()

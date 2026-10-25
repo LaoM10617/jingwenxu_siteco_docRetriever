@@ -21,11 +21,13 @@ PYTHON_IMAGE = 'python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176
 
 
 @contextmanager
-def _staging(work_dir):
+def _staging(work_dir, timings):
     # Keep inputs on exceptional exit: a failed Docker cleanup may still bind them.
     directory = Path(mkdtemp(prefix='job-', dir=work_dir))
     yield directory
+    cleanup_started = time.monotonic()
     shutil.rmtree(directory)
+    timings['staging_cleanup'] = time.monotonic() - cleanup_started
 
 
 @dataclass(frozen=True)
@@ -67,7 +69,7 @@ class PythonExecutor:
         name = container_name or 'siteco-python-' + uuid4().hex
         if not re.fullmatch(r'siteco-python-[a-f0-9]{32}', name):
             raise ValueError('Invalid execution container name')
-        with _staging(self.work_dir) as directory:
+        with _staging(self.work_dir, timings) as directory:
             root = Path(directory)
             staged = root / 'inputs'
             staged.mkdir()
@@ -141,7 +143,9 @@ class PythonExecutor:
                         continue
                     break
                 if status != 'completed':
+                    cleanup_started = time.monotonic()
                     self._remove(name)
+                    timings['container_cleanup'] = time.monotonic() - cleanup_started
                 process.wait(timeout=10)
                 for reader in readers:
                     reader.join(timeout=5)
@@ -149,7 +153,11 @@ class PythonExecutor:
                     raise RuntimeError('Python output stream did not close')
                 if status == 'completed' and overflow.is_set():
                     status = 'output_limit'
-                timings['start_and_execute'] = time.monotonic() - execution_start
+                # Includes Python startup/imports and script execution; no claim
+                # of import-only measurement. Forced removal belongs to cleanup.
+                timings['start_and_execute'] = (time.monotonic() - execution_start
+                                                - timings.get('container_cleanup', 0.0))
+                parse_started = time.monotonic()
                 value = None
                 diagnostic = buffers[1].decode('utf-8', errors='replace')
                 if status == 'completed':
@@ -163,7 +171,9 @@ class PythonExecutor:
                                 raise ValueError('Expected JSON object')
                         except (ValueError, UnicodeError):
                             status, value = 'invalid_output', None
+                timings['result_parse'] = time.monotonic() - parse_started
             finally:
+                cleanup_started = time.monotonic()
                 try:
                     # A timed-out create can still have succeeded at the daemon.
                     # Query our preallocated name even if no response was received.
@@ -175,8 +185,10 @@ class PythonExecutor:
                             process.wait(timeout=10)
                         for pipe in (process.stdout, process.stderr):
                             pipe.close()
-            timings['total'] = time.monotonic() - started
-            return ExecutionResult(status, value, timings, True, diagnostic)
+                    timings['container_cleanup'] = (timings.get('container_cleanup', 0.0)
+                                                     + time.monotonic() - cleanup_started)
+        timings['total'] = time.monotonic() - started
+        return ExecutionResult(status, value, timings, True, diagnostic)
 
     @staticmethod
     def _invalid_number(value):

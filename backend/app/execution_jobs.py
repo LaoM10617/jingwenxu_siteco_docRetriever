@@ -11,6 +11,7 @@ from uuid import uuid4
 from app.db import connect as sqlite_connect
 from app.documents import DocumentError
 from app.python_executor import ExecutionResult
+from app.timing import TimingEvent, record, span
 
 
 def _json(value):
@@ -114,68 +115,100 @@ class ExecutionJobs:
             if job_id in self._waiters:
                 raise DocumentError('execution_busy', 'This computation is already running.', 409)
             self._waiters.add(job_id)
-        started = time.monotonic()
-        try:
-            # The script/inputs can run tens of MB; writing them to disk here, with
-            # no SQLite transaction open, keeps the write transaction below touching
-            # only small, fixed-size columns, so it never holds the database lock
-            # for as long as the payload itself takes to persist.
-            self._write_payload(job_id, encoded)
-            with self._db() as db:
-                if not self._available(db, task_dict):
-                    raise DocumentError('source_unavailable', 'Execution sources or run are unavailable.', 409)
-                existing = db.execute('SELECT result FROM execution_jobs WHERE job_id=?', (job_id,)).fetchone()
-                run = db.execute('SELECT kind FROM conversation_runs WHERE run_id=?', (task.run_id,)).fetchone()
-                if existing and existing['result']:
-                    previous = ExecutionResult(**json.loads(existing['result']))
-                    if previous.cleaned_up and previous.status not in ('cancelled', 'timed_out', 'interrupted'):
-                        if run['kind'] == 'background':
-                            db.execute("UPDATE csv_explorations SET timings=json_set(timings,'$.execution_cache_hits',COALESCE(json_extract(timings,'$.execution_cache_hits'),0)+1) WHERE exploration_id=?", (task.run_id,))
-                        return previous
-                if run['kind'] == 'background':
-                    exploration = db.execute('SELECT execution_calls FROM csv_explorations WHERE exploration_id=?', (task.run_id,)).fetchone()
-                    if exploration is None or exploration[0] >= 2:
-                        raise DocumentError('exploration_execution_budget', 'The exploration execution budget was reached.', 409)
-                    db.execute('UPDATE csv_explorations SET execution_calls=execution_calls+1 WHERE exploration_id=?', (task.run_id,))
-                # Only this explicit execute invocation may requeue an interrupted job.
-                db.execute('''INSERT INTO execution_jobs
-                    (job_id,session_id,run_id,task_id,request_hash,task_json,status,created_at)
-                    VALUES (?,?,?,?,?,?,'queued',?) ON CONFLICT(job_id) DO UPDATE SET
-                    status='queued', lease_token=NULL, worker_id=NULL, lease_until=NULL,result=NULL''',
-                    (job_id, task.session_id, task.run_id, task.task_id, digest, _json(task_dict), time.time()))
-            while True:
-                budget.check()
-                # Plain read: no BEGIN IMMEDIATE, so this poll never competes for the
-                # single writer slot that a concurrent large execute() is holding.
-                with self._db(write=False) as db:
-                    row = db.execute('SELECT status,lease_until,result FROM execution_jobs WHERE job_id=?', (job_id,)).fetchone()
-                    if row is None or not self._available(db, task_dict):
+        with span('execution.job', job_id=job_id) as timing:
+            started = time.monotonic()
+            try:
+                # The script/inputs can run tens of MB; writing them to disk here, with
+                # no SQLite transaction open, keeps the write transaction below touching
+                # only small, fixed-size columns, so it never holds the database lock
+                # for as long as the payload itself takes to persist.
+                self._write_payload(job_id, encoded)
+                with self._db() as db:
+                    if not self._available(db, task_dict):
                         raise DocumentError('source_unavailable', 'Execution sources or run are unavailable.', 409)
-                    if row['result']:
-                        return ExecutionResult(**json.loads(row['result']))
-                    expired = row['status'] == 'interrupted' or (row['status'] == 'leased' and row['lease_until'] < time.time())
-                if expired:
-                    # Escalate to a write transaction only now, and re-check first:
-                    # the read above held no lock, so the lease may already have
-                    # been renewed or the result already written in the meantime.
-                    with self._db() as db:
+                    existing = db.execute('SELECT result FROM execution_jobs WHERE job_id=?', (job_id,)).fetchone()
+                    run = db.execute('SELECT kind FROM conversation_runs WHERE run_id=?', (task.run_id,)).fetchone()
+                    if existing and existing['result']:
+                        previous = ExecutionResult(**json.loads(existing['result']))
+                        if previous.cleaned_up and previous.status not in ('cancelled', 'timed_out', 'interrupted'):
+                            if run['kind'] == 'background':
+                                db.execute("UPDATE csv_explorations SET timings=json_set(timings,'$.execution_cache_hits',COALESCE(json_extract(timings,'$.execution_cache_hits'),0)+1) WHERE exploration_id=?", (task.run_id,))
+                            timing.cache_hit = True
+                            return previous
+                    timing.cache_hit = False
+                    if run['kind'] == 'background':
+                        exploration = db.execute('SELECT execution_calls FROM csv_explorations WHERE exploration_id=?', (task.run_id,)).fetchone()
+                        if exploration is None or exploration[0] >= 2:
+                            raise DocumentError('exploration_execution_budget', 'The exploration execution budget was reached.', 409)
+                        db.execute('UPDATE csv_explorations SET execution_calls=execution_calls+1 WHERE exploration_id=?', (task.run_id,))
+                    # Only this explicit execute invocation may requeue an interrupted job.
+                    db.execute('''INSERT INTO execution_jobs
+                        (job_id,session_id,run_id,task_id,request_hash,task_json,status,created_at)
+                        VALUES (?,?,?,?,?,?,'queued',?) ON CONFLICT(job_id) DO UPDATE SET
+                        status='queued', lease_token=NULL, worker_id=NULL, lease_until=NULL,result=NULL''',
+                        (job_id, task.session_id, task.run_id, task.task_id, digest, _json(task_dict), time.time()))
+                while True:
+                    budget.check()
+                    # Plain read: no BEGIN IMMEDIATE, so this poll never competes for the
+                    # single writer slot that a concurrent large execute() is holding.
+                    with self._db(write=False) as db:
                         row = db.execute('SELECT status,lease_until,result FROM execution_jobs WHERE job_id=?', (job_id,)).fetchone()
-                        if row and row['result']:
-                            return ExecutionResult(**json.loads(row['result']))
-                        if row and (row['status'] == 'interrupted' or (row['status'] == 'leased' and row['lease_until'] < time.time())):
-                            db.execute("UPDATE execution_jobs SET status='interrupted' WHERE job_id=?", (job_id,))
-                            return ExecutionResult('interrupted', None, {'total': time.monotonic()-started}, False)
-                if time.monotonic() - started > task.budget.timeout_seconds:
-                    return ExecutionResult('timed_out', None, {'total': time.monotonic()-started}, False)
-                time.sleep(self.poll_seconds)
-        finally:
-            with self._guard:
-                self._waiters.discard(job_id)
-            with self._db() as db:
-                db.execute("UPDATE execution_jobs SET status='interrupted' WHERE job_id=? AND result IS NULL", (job_id,))
-            # Without a waiter the job can never be claimed again, so its script and
-            # inputs (a copy of the source data) are deleted on every exit path.
-            self._delete_payload(job_id)
+                        if row is None or not self._available(db, task_dict):
+                            raise DocumentError('source_unavailable', 'Execution sources or run are unavailable.', 409)
+                        if row['result']:
+                            return self._worker_result(row['result'])
+                        expired = row['status'] == 'interrupted' or (row['status'] == 'leased' and row['lease_until'] < time.time())
+                    if expired:
+                        # Escalate to a write transaction only now, and re-check first:
+                        # the read above held no lock, so the lease may already have
+                        # been renewed or the result already written in the meantime.
+                        with self._db() as db:
+                            row = db.execute('SELECT status,lease_until,result FROM execution_jobs WHERE job_id=?', (job_id,)).fetchone()
+                            if row and row['result']:
+                                return self._worker_result(row['result'])
+                            if row and (row['status'] == 'interrupted' or (row['status'] == 'leased' and row['lease_until'] < time.time())):
+                                db.execute("UPDATE execution_jobs SET status='interrupted' WHERE job_id=?", (job_id,))
+                                return ExecutionResult('interrupted', None, {'total': time.monotonic()-started}, False)
+                    if time.monotonic() - started > task.budget.timeout_seconds:
+                        return ExecutionResult('timed_out', None, {'total': time.monotonic()-started}, False)
+                    time.sleep(self.poll_seconds)
+            finally:
+                with self._guard:
+                    self._waiters.discard(job_id)
+                with self._db() as db:
+                    db.execute("UPDATE execution_jobs SET status='interrupted' WHERE job_id=? AND result IS NULL", (job_id,))
+                # Without a waiter the job can never be claimed again, so its script and
+                # inputs (a copy of the source data) are deleted on every exit path.
+                self._delete_payload(job_id)
+
+    @staticmethod
+    def _worker_result(encoded):
+        result = ExecutionResult(**json.loads(encoded))
+        # Host phases are host-clock durations of this attempt only; a cache hit
+        # returns earlier and never re-reports them.
+        for phase, seconds in result.seconds.items():
+            record('execution.host.' + phase, seconds, clock_domain='host')
+        return result
+
+    def record_worker_timing(self, job_id, lease_token, report_id, seconds):
+        """Store a host measurement that is only known after completion was accepted."""
+        with self._db() as db:
+            row = db.execute('SELECT run_id,task_id,task_json,lease_token,result FROM execution_jobs WHERE job_id=?',
+                             (job_id,)).fetchone()
+            if row is None or row['lease_token'] != lease_token or row['result'] is None:
+                return False
+            turn_id = json.loads(row['task_json'])['turn_id']
+            for stage, value in seconds.items():
+                # report_id makes a retried report idempotent; the lease token is a
+                # credential and is deliberately not stored as the attempt identity.
+                event = TimingEvent(run_id=row['run_id'], turn_id=turn_id, task_id=row['task_id'],
+                    job_id=job_id, attempt_id=report_id, span_id=report_id + ':' + stage,
+                    stage='execution.' + stage, clock_domain='host',
+                    started_at=time.time() - value, duration_ms=value * 1000)
+                db.execute('INSERT OR IGNORE INTO conversation_events VALUES (?, ?, ?, ?, ?)',
+                    (row['run_id'] + ':timing:' + event.span_id, row['run_id'], 'developer', 'timing',
+                     _json(event.model_dump(mode='json'))))
+            return True
 
     def claim(self, worker_id, image=None):
         if self.expected_image is not None and image != self.expected_image:

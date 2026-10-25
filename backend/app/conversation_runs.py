@@ -2,6 +2,8 @@
 from contextlib import contextmanager
 import hashlib
 import json
+import logging
+import time
 from pathlib import Path
 import sqlite3
 from threading import Event
@@ -21,6 +23,7 @@ from app.conversation_context import ConversationContext, InteractionSummary
 from app.db import connect as sqlite_connect
 from app.documents import DocumentError
 from app.questions import QuestionBudget
+from app.timing import TimingEvent, capture, span, timed
 from app.sessions import SessionStore
 
 
@@ -181,6 +184,10 @@ class _RunModel:
                               (self.run_id, key)).fetchone() is not None
 
     def generate(self, system, payload, schema, budget):
+        with span('model.' + payload.get('phase', 'generation'), task_id=payload.get('task_id'), cache_hit=False) as timing:
+            return self._generate(system, payload, schema, budget, timing)
+
+    def _generate(self, system, payload, schema, budget, timing):
         budget.check()
         receipt_key = (hashlib.sha256(_json([system, payload, schema]).encode()).hexdigest()
                        if payload.get('phase', '').startswith(('csv', 'pdf_')) else None)
@@ -190,6 +197,7 @@ class _RunModel:
                 prior = db.execute('SELECT response FROM conversation_model_receipts WHERE run_id=? AND receipt_key=?',
                                    (self.run_id, receipt_key)).fetchone()
             if prior:
+                timing.cache_hit = True
                 return json.loads(prior[0])
         with self.owner._db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -228,6 +236,8 @@ class ConversationRuns:
         self._shutdown = Event()
         self._bound = {}
         self._accepted = set()
+        # Diagnostic clocks only: never authorize or schedule work.
+        self._queued_timings = {}
         # Optional crash-probe seam after business commit but before checkpoint.
         self._after_publish = after_publish
         with self._db() as db:
@@ -407,6 +417,8 @@ class ConversationRuns:
 
     def submit(self, session_id, request_id, question, *, expected_data_version,
                expected_rule_version, explicit_sources=None):
+        received = time.monotonic()
+        received_at = time.time()
         if not isinstance(question, str) or not question.strip() or len(question) > 8000 or not request_id:
             raise DocumentError('invalid_question', 'A question and request identity are required.', 422)
         request = {'question': question, 'data_version': expected_data_version, 'rule_version': expected_rule_version,
@@ -440,6 +452,10 @@ class ConversationRuns:
                 self.sessions.append_message(session_id, run_id + ':question', 'user', question, db=db)
                 self._event(db, run_id, 'accepted', 'user', 'progress', {'message': 'Request accepted.'})
         if created:
+            self._queued_timings[run_id] = (time.monotonic(), time.time())
+            self._save_timings([TimingEvent(run_id=run_id, attempt_id=uuid4().hex,
+                stage='run.accept', started_at=received_at,
+                duration_ms=(time.monotonic()-received)*1000).model_dump(mode='json')])
             self._bound[run_id] = service
             self._accepted.add(run_id)
             if hasattr(self, 'exploration'):
@@ -529,6 +545,7 @@ class ConversationRuns:
                 self._event(db, run_id, f"specialist_retry:{row['model_calls']}", 'developer', 'retry',
                             {'task_ids': failed_csv or [invalid_receipt['task_id']], 'model_call_baseline': row['model_calls']})
             db.execute("UPDATE conversation_runs SET status='queued',stop_requested=0,error=NULL,failed_receipt_key=NULL,replies=? WHERE run_id=?", (_json(replies), run_id))
+        self._queued_timings[run_id] = (time.monotonic(), time.time())
         self._bound[run_id] = service
         self._accepted.add(run_id)
         if hasattr(self, 'exploration'):
@@ -894,7 +911,7 @@ class ConversationRuns:
         try:
             graph = StateGraph(_State)
             for name, node in (('intent', intent), ('clarify', clarify), ('scope', scope), ('answer', answer), ('publish', publish)):
-                graph.add_node(name, node)
+                graph.add_node(name, timed("run." + name)(node))
             graph.add_edge(START, 'intent')
             graph.add_conditional_edges('intent', lambda state: 'clarify' if state['intent']['route'] == 'clarification' else 'scope')
             graph.add_edge('clarify', 'intent')
@@ -905,7 +922,37 @@ class ConversationRuns:
         finally:
             connection.close()
 
+    def _save_timings(self, entries):
+        if not entries:
+            return
+        try:
+            with self._db() as db:
+                for event in entries:
+                    self._event(db, event['run_id'], 'timing:' + event['span_id'], 'developer', 'timing', event)
+        except sqlite3.Error:
+            # Observability failure must not turn a committed answer into a failure.
+            logging.getLogger(__name__).warning('Timing persistence unavailable', exc_info=False)
+
     def execute(self, run_id):
+        row = self._row(run_id)
+        if row['status'] in ('completed', 'stopped', 'waiting', 'failed'):
+            self._queued_timings.pop(run_id, None)
+            return self._execute(run_id)
+        with capture(run_id, row['turn_id']) as recorder:
+            queued = self._queued_timings.pop(run_id, None)
+            if queued is not None:
+                recorder.entries.append(TimingEvent(run_id=run_id, turn_id=row['turn_id'],
+                    attempt_id=recorder.attempt_id, stage='run.queue', started_at=queued[1],
+                    duration_ms=(time.monotonic()-queued[0])*1000).model_dump(mode='json'))
+            try:
+                with span('run.total') as event:
+                    result = self._execute(run_id)
+                    event.status = result['status']
+                    return result
+            finally:
+                self._save_timings(recorder.entries)
+
+    def _execute(self, run_id):
         row = self._row(run_id)
         sid = row['session_id']
         with self._session_lock(sid):

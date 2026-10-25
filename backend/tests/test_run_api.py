@@ -156,3 +156,29 @@ def test_user_events_never_contain_developer_error_payload(tmp_path):
         assert 'RuntimeError' not in public.text
         assert 'PRIVATE_PROVIDER_DIAGNOSTIC' not in public.text + technical.text
         assert any(event['kind'] == 'error' for event in technical.json())
+
+
+def test_stage_timings_are_durable_developer_only_and_do_not_repeat_on_resubmit(tmp_path):
+    model = Model()
+    with TestClient(prepared(tmp_path, model)) as client:
+        sid, _ = upload(client, tmp_path)
+        body = submission(client, sid)
+        rid = client.post(f'/api/sessions/{sid}/runs', json=body).json()['run_id']
+        assert poll(client, sid, rid, {'completed', 'failed'})['status'] == 'completed'
+        path = f'/api/developer/sessions/{sid}/runs/{rid}/events'
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            timings = [e['payload'] for e in client.get(path).json() if e['kind'] == 'timing']
+            if any(e['stage'] == 'run.total' for e in timings):
+                break
+            time.sleep(.01)
+        stages = {e['stage'] for e in timings}
+        assert {'run.total', 'run.intent', 'run.scope', 'run.publish', 'model.intent'} <= stages
+        assert all(e['schema_version'] == 1 and e['duration_ms'] >= 0 for e in timings)
+        assert all(e['run_id'] == rid and e['span_id'] and e['attempt_id'] for e in timings)
+        assert next(e for e in timings if e['stage'] == 'model.intent')['cache_hit'] is False
+        assert not any(e['kind'] == 'timing' for e in client.get(f'/api/sessions/{sid}/runs/{rid}/events').json())
+        client.post(f'/api/sessions/{sid}/runs', json=body)
+        assert [e['payload'] for e in client.get(path).json() if e['kind'] == 'timing'] == timings
+    with TestClient(prepared(tmp_path, Model())) as client:
+        assert [e['payload'] for e in client.get(path).json() if e['kind'] == 'timing'] == timings

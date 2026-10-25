@@ -93,12 +93,34 @@ def test_script_failure_gets_one_repair_and_result_is_preserved():
     assert executor.calls[1][0] == SCRIPT_PREAMBLE + 'fixed()'
 
 
+def test_repair_timings_preserve_both_attempts_without_changing_inputs():
+    model = Model(plan(), {'decision': 'repair', 'reason': 'fix typo', 'script': 'fixed()', 'clarification': None})
+    executor = Executor(ExecutionResult('failed', None, {}, True, 'NameError'), success())
+    specialist, task = setup(model, executor)
+    result = specialist.execute(task, QuestionBudget())
+    timings = result['diagnostics']['timings']
+    attempts = [event for event in timings if event['stage'] == 'csv.execute_attempt']
+    assert len(attempts) == 2
+    assert len({event['attempt_id'] for event in attempts}) == 2
+    assert [event['status'] for event in attempts] == ['failed', 'completed']
+    assert all(event['task_id'] == 'csv' and event['run_id'] == 'run' for event in timings)
+    assert all(event['duration_ms'] >= 0 for event in timings)
+    assert {'csv.snapshot', 'csv.overview', 'csv.plan', 'csv.review', 'csv.check',
+            'csv.collect', 'csv.input_json'} <= {event['stage'] for event in timings}
+    assert executor.calls[0][1] == executor.calls[1][1]
+    assert set(executor.calls[0][1]) == {'datasets.json', 'artifacts.json'}
+    assert 'timings' not in json.dumps(model.calls)
+    assert 'timings' not in json.dumps(result['artifacts'])
+
+
 def test_invalid_output_cannot_be_approved_by_model():
     model = Model(plan(), {'decision': 'accept', 'reason': 'looks fine', 'script': '', 'clarification': None})
     specialist, task = setup(model, Executor(success(rows=[[float('nan')]])))
     result = specialist.execute(task, QuestionBudget())
     assert result['result']['status'] == 'failed'
     assert not result['artifacts']
+    checks = [event for event in result['diagnostics']['timings'] if event['stage'] == 'csv.check']
+    assert checks[0]['status'] == 'failed'
 
 
 def test_complex_analysis_is_reviewed_and_ambiguity_is_not_silently_fixed():

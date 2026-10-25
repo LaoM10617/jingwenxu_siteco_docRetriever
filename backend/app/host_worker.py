@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from dataclasses import asdict
 import json
+import logging
 from pathlib import Path
 import shutil
 import sqlite3
@@ -124,7 +125,9 @@ class HostWorker:
                 db.execute("UPDATE jobs SET status='acknowledged',result=NULL WHERE job_id=?", (job_id,))
 
     def run_once(self):
+        claim_started = time.monotonic()
         job = self.client.post('/claim', {'worker_id': self.owner, 'image': self.executor.image})['job']
+        claim_seconds = time.monotonic() - claim_started
         if job is None:
             return False
         job_id, token = job['job_id'], job['lease_token']
@@ -151,6 +154,7 @@ class HostWorker:
         root = self.work_dir / 'inputs' / uuid4().hex
         root.mkdir(parents=True)
         try:
+            input_started = time.monotonic()
             paths = {}
             for filename, contents in job['inputs'].items():
                 if (not filename or filename in ('.', '..') or
@@ -159,6 +163,7 @@ class HostWorker:
                 target = root / filename
                 target.write_text(contents, encoding='utf-8')
                 paths[filename] = target
+            input_seconds = time.monotonic() - input_started
             try:
                 result = self.executor.execute(job['script'], paths, cancel=cancel, container_name=name)
             except (RuntimeError, OSError, subprocess.SubprocessError):
@@ -166,14 +171,30 @@ class HostWorker:
                 self.stop.set()
                 result = ExecutionResult('interrupted', None, {}, False, 'Host execution or cleanup failed')
             encoded = asdict(result)
+            # Freeze timings before persistence: a lost completion acknowledgment
+            # must replay exactly the same result, including diagnostic durations.
+            encoded['seconds'].update(host_claim_and_input_transfer=claim_seconds,
+                                      host_input_write=input_seconds)
             with self._db() as db:
                 db.execute("UPDATE jobs SET status='finished',result=? WHERE job_id=?",
                            (json.dumps(encoded, allow_nan=False), job_id))
+            report_started = time.monotonic()
             for attempt in range(3):
                 try:
-                    self.client.post('/' + job_id + '/complete', {'lease_token': token, 'result': encoded})
+                    response = self.client.post('/' + job_id + '/complete', {'lease_token': token, 'result': encoded})
+                    report_seconds = time.monotonic() - report_started
                     with self._db() as db:
                         db.execute("UPDATE jobs SET status='acknowledged',result=NULL WHERE job_id=?", (job_id,))
+                    if response.get('accepted'):
+                        # This includes completion retry/backoff time. Report it
+                        # separately because the business result is already frozen.
+                        try:
+                            self.client.post('/' + job_id + '/timings', {
+                                'lease_token': token, 'report_id': str(uuid4()),
+                                'seconds': {'host_completion_report': report_seconds}})
+                        except (OSError, ValueError):
+                            logging.getLogger(__name__).warning(
+                                'Completion timing report unavailable for job %s', job_id)
                     break
                 except OSError:
                     if attempt == 2:

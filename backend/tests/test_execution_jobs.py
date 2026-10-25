@@ -2,10 +2,12 @@ import json
 import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
 
 from app.agent_protocol import TaskPackage, ScopeSnapshot
 from app.execution_jobs import ExecutionJobs
 from app.questions import QuestionBudget
+from app.timing import capture, span
 import pytest
 from app.documents import DocumentError
 
@@ -139,6 +141,63 @@ def test_explicit_resume_reruns_cancelled_result(execution):
                 {'status': status, 'value': {} if status == 'completed' else None,
                  'seconds': {}, 'cleaned_up': True})
             assert future.result(timeout=2).status == status
+
+
+def test_job_timings_separate_host_phases_from_execution_cache_hits(execution):
+    jobs, task = execution
+    def measured():
+        with capture('r', 't') as recorder:
+            with span('csv.execute_attempt', task_id='task'):
+                result = jobs.execute(task, 'print(1)', {}, QuestionBudget())
+            return result, recorder.entries
+    with ThreadPoolExecutor() as pool:
+        future = pool.submit(measured)
+        claim = claim_eventually(jobs)
+        assert jobs.complete(claim['job_id'], claim['lease_token'],
+            {'status': 'completed', 'value': {}, 'cleaned_up': True,
+             'seconds': {'create': .25, 'start_and_execute': 1.5, 'total': 2.0}})
+        result, fresh = future.result(timeout=2)
+    attempt = next(e for e in fresh if e['stage'] == 'csv.execute_attempt')
+    job = next(e for e in fresh if e['stage'] == 'execution.job')
+    assert job['cache_hit'] is False and job['job_id'] == claim['job_id']
+    assert job['parent_span_id'] == attempt['span_id'] and job['task_id'] == 'task'
+    host = {e['stage']: e for e in fresh if e['clock_domain'] == 'host'}
+    assert {stage: e['duration_ms'] for stage, e in host.items()} == {
+        'execution.host.create': 250, 'execution.host.start_and_execute': 1500, 'execution.host.total': 2000}
+    assert all(e['parent_span_id'] == job['span_id'] and e['job_id'] == claim['job_id'] for e in host.values())
+    # A reused result ran in an earlier attempt: its host phases must not be counted again.
+    _, replay = measured()
+    assert [(e['stage'], e['cache_hit']) for e in replay if e['stage'].startswith('execution.')] == [
+        ('execution.job', True)]
+
+
+def test_completion_report_is_recorded_once_and_only_for_its_lease(execution):
+    jobs, task = execution
+    with sqlite3.connect(jobs.database) as db:
+        db.execute('CREATE TABLE conversation_events (event_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, '
+                   'channel TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL)')
+    report = str(uuid4())
+    with ThreadPoolExecutor() as pool:
+        future = pool.submit(jobs.execute, task, 'print(1)', {}, QuestionBudget())
+        claim = claim_eventually(jobs)
+        # Not yet accepted: no completion exists that the report could describe.
+        assert not jobs.record_worker_timing(claim['job_id'], claim['lease_token'], report,
+                                             {'host_completion_report': .5})
+        assert jobs.complete(claim['job_id'], claim['lease_token'],
+            {'status': 'completed', 'value': {}, 'seconds': {}, 'cleaned_up': True})
+        future.result(timeout=2)
+    assert not jobs.record_worker_timing(claim['job_id'], 'x' * 32, report, {'host_completion_report': .5})
+    assert not jobs.record_worker_timing('missing', claim['lease_token'], report, {'host_completion_report': .5})
+    for _ in range(2):
+        assert jobs.record_worker_timing(claim['job_id'], claim['lease_token'], report,
+                                         {'host_completion_report': .5})
+    with sqlite3.connect(jobs.database) as db:
+        rows = db.execute('SELECT run_id,channel,kind,payload FROM conversation_events').fetchall()
+    assert [(run_id, channel, kind) for run_id, channel, kind, _ in rows] == [('r', 'developer', 'timing')]
+    event = json.loads(rows[0][3])
+    assert (event['stage'], event['clock_domain'], event['duration_ms'], event['job_id'], event['task_id'],
+            event['turn_id']) == ('execution.host_completion_report', 'host', 500, claim['job_id'], 'task', 't')
+    assert claim['lease_token'] not in rows[0][3]
 
 
 def test_legacy_inline_payload_table_keeps_only_finished_results(tmp_path):
