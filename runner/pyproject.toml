@@ -1,0 +1,15 @@
+# CSV sandbox image: separate trust boundary, resolved on its own (ADR 0007).
+# The image installs runner/requirements.lock, exported from uv.lock with hashes; do not edit it by hand.
+[project]
+name = "siteco-csv-runner"
+version = "0.1.0"
+requires-python = "==3.12.*"
+dependencies = [
+    "numpy>=2.5.4",
+    "pandas>=3.0.6",
+]
+
+[tool.uv]
+package = false
+required-version = "==0.12.24"
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]

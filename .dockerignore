@@ -1,12 +1,10 @@
 # Build allowlist: never send local credentials, data, environments or Git.
 # app/** includes the question worker and tokenizer CLI; eval reports stay excluded.
 **
+!pyproject.toml
+!uv.lock
 !backend/
 !backend/Dockerfile
-!backend/requirements.txt
-!backend/requirements.lock.txt
-!backend/requirements-dev.txt
-!backend/requirements-dev.lock.txt
 !backend/app/
 !backend/app/**
 !backend/tests/

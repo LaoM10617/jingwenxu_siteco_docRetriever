@@ -128,6 +128,8 @@ uses `.venv/bin/python` and equivalent environment setup.
 
 - Docker with Linux containers; the pandas runner is validated on Linux/amd64.
 - Host Python 3.12 for the worker, including when the UI/backend run in Docker.
+- [uv](https://docs.astral.sh/uv/) at the version in `pyproject.toml`
+  (`[tool.uv] required-version`); it creates `.venv` from `uv.lock`.
 - Node.js 24 only when running/building the frontend outside Docker.
 - Your own generation and embedding credentials.
 
@@ -135,8 +137,7 @@ Create `.env` from [.env.example](.env.example) if it does not already exist:
 
 ```powershell
 if (!(Test-Path .env)) { Copy-Item .env.example .env }
-py -3.12 -m venv .venv
-.venv/Scripts/python.exe -m pip install -r backend/requirements.lock.txt
+uv sync --locked --python 3.12
 ```
 
 Edit `.env` locally. Environment variables override its values.
@@ -178,7 +179,8 @@ an existing `HOST_DATA_DIR`), use one command for first start and every update:
 the containers, prepares the tokenizer on first start, and fails unless the running
 backend/frontend report the fingerprint of the current source. The worker runs in the
 background (`data/demo-worker`, log `data/launcher/worker.log`) and is replaced only
-when its code, runner image, token or backend port changed. Before anything that
+when its code, `uv.lock`, runner image, token or backend port changed; `up` and `check`
+run `uv sync --locked` so `.venv` matches the lock. Before anything that
 would interrupt a running CSV computation, `up`/`down` wait up to `--wait` seconds
 (default 300); `--force` interrupts it instead (the question can be resumed).
 Close any worker started by hand first; the launcher refuses to run beside it.
@@ -385,7 +387,8 @@ database.
 `main` and on every pull request. It uses no secrets, so it makes no real model or
 embedding calls and runs no paid probes. It has four jobs:
 
-- the full backend pytest suite, including the Docker isolation tests against a
+- lock-file checks (`uv lock --check`, runner export matches `runner/uv.lock`) and
+  the full backend pytest suite, including the Docker isolation tests against a
   freshly built runner image;
 - the frontend type check and build;
 - a Compose configuration check and image builds;
@@ -393,10 +396,19 @@ embedding calls and runs no paid probes. It has four jobs:
 
 `scripts/siteco.py check` runs the same checks locally, apart from the Windows job.
 
-Run backend tests after installing the development lock file:
+**Dependencies.** Python versions are fixed only by the lock files: `uv.lock` for the
+backend and host worker (Windows and Linux), and `runner/uv.lock` for the sandbox image.
+`runner/requirements.lock` is exported from the latter with hashes; never edit it by hand.
+Add a dependency with `uv add` when code first uses it, and install only with
+`uv sync --locked` (no ad-hoc `pip install`). After changing `runner/pyproject.toml`, run
+`uv lock --directory runner`, then
+`uv export --directory runner --frozen --no-dev --no-emit-project --no-header --format requirements-txt -o requirements.lock`.
+Renovate proposes updates (`renovate.json`); nothing is merged automatically.
+
+Run backend tests (`uv sync --locked` installs the `dev` group by default):
 
 ```powershell
-.venv/Scripts/python.exe -m pip install -r backend/requirements-dev.lock.txt
+uv sync --locked
 .venv/Scripts/python.exe -m pytest -q
 docker build --target test -t siteco-tests -f backend/Dockerfile .
 npm ci --prefix frontend

@@ -1,0 +1,38 @@
+# Backend and Windows host worker share this environment (ADR 0007).
+# Exact versions live in uv.lock only; lower bounds are the versions verified when added.
+[project]
+name = "siteco-document-chat"
+version = "0.1.0"
+requires-python = "==3.12.*"
+dependencies = [
+    "rank-bm25>=0.2.2",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
+    "fastapi>=0.141.1",
+    "uvicorn>=0.54.0",
+    "python-multipart>=0.0.32",
+    "pdfplumber>=0.11.10",
+    "voyageai>=0.5.0",
+    "tokenizers>=0.23.2",
+    "faiss-cpu>=1.15.1",
+    "google-genai>=2.25.0",
+    "groq>=1.7.0",
+    # Coupled family; upgrade together as one verified change (ADR 0006 §2).
+    "langgraph>=1.2.14",
+    "langgraph-checkpoint-sqlite>=3.1.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "httpx>=0.28.1",
+]
+
+[tool.uv]
+package = false
+required-version = "==0.12.24"
+# Windows host worker and Linux containers; nothing else is resolved.
+environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]

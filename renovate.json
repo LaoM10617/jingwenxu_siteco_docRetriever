@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Rules from ADR 0007. No automerge: merging stays a manual decision.",
+  "extends": ["config:recommended", ":dependencyDashboard"],
+  "minimumReleaseAge": "14 days",
+  "internalChecksFilter": "strict",
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": { "minimumReleaseAge": null },
+  "pinDigests": true,
+  "automerge": false,
+  "schedule": ["before 6am on monday"],
+  "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on the first day of the month"] },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "uv version required by the projects; Renovate's pep621 manager does not read it",
+      "managerFilePatterns": ["/(^|/)pyproject\\.toml$/"],
+      "matchStrings": ["required-version = \"==(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "astral-sh/uv",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
+  "packageRules": [
+    { "matchManagers": ["pep621"], "rangeStrategy": "update-lockfile" },
+    { "matchUpdateTypes": ["minor", "patch"], "groupName": "non-major updates" },
+    { "matchUpdateTypes": ["major"], "dependencyDashboardApproval": true },
+    { "matchManagers": ["dockerfile", "docker-compose"], "groupName": "Docker images" },
+    { "matchManagers": ["github-actions"], "matchDepTypes": ["action"], "groupName": "GitHub Actions" },
+    {
+      "groupName": "langgraph",
+      "matchPackageNames": ["/^langgraph(-checkpoint(-postgres|-sqlite)?|-prebuilt|-sdk)?$/i"]
+    },
+    { "groupName": "celery", "matchPackageNames": ["/^(celery|kombu|redis|amqp|billiard|vine)$/i"] },
+    { "groupName": "sqlalchemy", "matchPackageNames": ["/^(sqlalchemy|alembic)$/i"] },
+    { "groupName": "psycopg", "matchPackageNames": ["/^psycopg(-binary|-pool)?$/i"] },
+    {
+      "groupName": "runner data stack",
+      "matchFileNames": ["runner/**"],
+      "matchPackageNames": ["/^(numpy|pandas|pyarrow)$/i"]
+    },
+    { "groupName": "uv", "matchPackageNames": ["astral-sh/uv", "ghcr.io/astral-sh/uv"] }
+  ]
+}

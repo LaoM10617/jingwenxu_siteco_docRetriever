@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -37,11 +38,12 @@ WORKER_SCRIPT = ROOT / 'scripts' / 'run_python_worker.py'
 
 # Inputs of each built artifact. Over-inclusion only costs an extra restart; omission
 # would let stale code keep running, which is the failure this launcher exists to prevent.
-BACKEND_INPUTS = ('backend/app', 'backend/requirements.lock.txt', 'backend/Dockerfile')
+BACKEND_INPUTS = ('backend/app', 'pyproject.toml', 'uv.lock', 'backend/Dockerfile')
 FRONTEND_INPUTS = ('frontend/src', 'frontend/public', 'frontend/index.html', 'frontend/package.json',
                    'frontend/package-lock.json', 'frontend/tsconfig.json', 'frontend/vite.config.ts',
                    'frontend/nginx.conf', 'frontend/Dockerfile')
-WORKER_INPUTS = ('backend/app', 'scripts/run_python_worker.py')
+# The worker imports from .venv, so a lock change must restart it after `uv sync`.
+WORKER_INPUTS = ('backend/app', 'scripts/run_python_worker.py', 'uv.lock')
 SKIP_DIRS = {'__pycache__', 'node_modules', 'dist', '.pytest_cache'}
 SKIP_SUFFIXES = {'.pyc', '.pyo', '.tsbuildinfo'}
 
@@ -162,6 +164,18 @@ def venv_python():
         if candidate.is_file():
             return candidate
     raise LauncherError('Project .venv not found. Create it as described in README "Prerequisites".')
+
+
+def uv():
+    path = shutil.which('uv')
+    if path is None:
+        raise LauncherError('uv not found on PATH. Install the version in pyproject.toml (README "Prerequisites").')
+    return path
+
+
+def sync_environment():
+    """Make .venv match uv.lock exactly (ADR 0007: install only from the lock). A no-op when current."""
+    run([uv(), 'sync', '--locked', '--quiet'], capture=False)
 
 
 def worker_command(python, config, image):
@@ -350,6 +364,9 @@ def up(args):
         stop_worker(state)
     else:
         print('[2/5] Worker ' + ('up to date' if state else 'not running'))
+    # After an outdated worker stopped: a changed uv.lock always makes it outdated, so no
+    # running worker holds files that sync replaces.
+    sync_environment()
 
     print('[3/5] Building and starting frontend/backend')
     compose_env = {**os.environ, 'BACKEND_FINGERPRINT': builds[0], 'FRONTEND_FINGERPRINT': builds[1]}
@@ -408,6 +425,8 @@ def status(args):
 
 
 CHECK_RUNNER_TAG = 'siteco-csv-runner:check'
+# Same arguments as in CI; the export is a generated file and must match runner/uv.lock.
+RUNNER_EXPORT = ('--frozen', '--no-dev', '--no-emit-project', '--no-header', '--format', 'requirements-txt', '--quiet')
 
 
 def check(args):
@@ -426,6 +445,16 @@ def check(args):
             print(f'error: {error}', file=sys.stderr)
             results.append((name, 'FAILED'))
 
+    def locks():
+        run([uv(), 'lock', '--check'], capture=False)
+        run([uv(), 'lock', '--check', '--directory', 'runner'], capture=False)
+        exported = run([uv(), 'export', '--directory', 'runner', *RUNNER_EXPORT]).stdout
+        committed = (ROOT / 'runner' / 'requirements.lock').read_text(encoding='utf-8')
+        if exported.replace('\r\n', '\n') != committed.replace('\r\n', '\n'):
+            raise LauncherError('runner/requirements.lock differs from runner/uv.lock; regenerate it '
+                                f'with `uv export --directory runner {" ".join(RUNNER_EXPORT)} -o requirements.lock`.')
+        sync_environment()
+
     def pytest():
         image = run(['docker', 'build', '-q', '--provenance=false', '-t', CHECK_RUNNER_TAG,
                      '-f', 'runner/Dockerfile', '.']).stdout.strip()
@@ -440,6 +469,7 @@ def check(args):
                        'FRONTEND_FINGERPRINT': fingerprint(FRONTEND_INPUTS)}
         run(['docker', 'compose', 'build'], capture=False, env=compose_env)
 
+    step('Lock files and environment', locks)
     step('Backend tests incl. Docker isolation and launcher', pytest)
     step('Compose configuration, images and frontend build', images)
     print('\n=== Summary ===')
