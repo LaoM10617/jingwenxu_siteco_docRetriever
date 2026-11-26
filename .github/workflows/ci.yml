@@ -33,7 +33,7 @@ jobs:
       # Same uv version as [tool.uv] required-version and the Dockerfile (ADR 0007).
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: '0.12.24'
+          version: '0.13.8'
           enable-cache: true
       - name: Lock files match pyproject.toml; runner export matches its lock
         run: |
@@ -90,7 +90,7 @@ jobs:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: '0.12.24'
+          version: '0.13.8'
           enable-cache: true
       # The host worker runs from this lock on Windows, so installing it is itself a check.
       - name: Install locked dependencies
